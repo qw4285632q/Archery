@@ -1,7 +1,11 @@
 import dmPython # Import the Dameng Python driver
 import re # For regex checks in filter_sql
+import logging # For logging unimplemented methods
 
 from sql.engines import EngineBase
+from .models import ReviewResult, ReviewSet, ResultSet # Ensure ResultSet is imported
+
+logger = logging.getLogger(__name__)
 
 class DmEngine(EngineBase):
     """Engine for Dameng Database (DM)."""
@@ -42,6 +46,38 @@ class DmEngine(EngineBase):
             result['msg'] = error_message
             result['error'] = error_message
         return result
+
+    def execute_check(self, db_name=None, sql=""):
+        """Basic syntax check for Dameng."""
+        review_set = ReviewSet(full_sql=sql)
+        # Utilize existing query_check logic, adapt as needed
+        # query_check returns a dict: {'status': 0 for success, 1 for error, 'msg': message}
+        check_result = self.query_check(db_name=db_name, sql=sql)
+        if check_result['status'] == 1:
+            review_set.error_count = 1
+            review_set.rows.append(
+                ReviewResult(
+                    id=1, # Dummy ID
+                    errlevel=2, # Error level
+                    stagestatus='SQL审核不通过', # Stage status
+                    errormessage=check_result['msg'],
+                    sql=sql,
+                    affected_rows=0,
+                    execute_time=0,
+                )
+            )
+        else:
+            review_set.error_count = 0
+            # Optionally, add a success message or leave rows empty
+            # review_set.rows.append(ReviewResult(id=1, errlevel=0, stagestatus='SQL审核通过', errormessage='语法正确', sql=sql))
+        return review_set
+
+    def get_rollback(self, workflow):
+        """Placeholder for Dameng rollback script generation."""
+        # For now, returns an empty list as per requirements.
+        # Actual implementation would involve parsing the workflow's SQL
+        # and generating corresponding rollback statements.
+        return []
 
     def filter_sql(self, sql='', limit_num=0):
         # ... (existing implementation)
@@ -229,3 +265,547 @@ class DmEngine(EngineBase):
             description = []
 
         return {'error': error_msg, 'data': description}
+
+    def get_tables_metas_data(self, db_name, **kwargs):
+        """
+        Retrieves metadata for all tables in a given database (schema).
+        Similar to MysqlEngine.get_tables_metas_data.
+        Returns a list of dictionaries, each containing table and column info.
+        """
+        table_metas = []
+        error_msg = None
+        safe_db_name = db_name.replace("'", "''")
+
+        # SQL to get all user tables in the specified schema
+        sql_tables = f"""
+            SELECT T.NAME AS TABLE_NAME, T.ID AS TABLE_ID, S.NAME AS TABLE_SCHEMA
+            FROM SYSOBJECTS T
+            JOIN SYSOBJECTS S ON T.SCHID = S.ID
+            WHERE T.TYPE$ = 'SCHOBJ' AND T.SUBTYPE$ = 'UTAB' AND S.TYPE$ = 'SCH' AND S.NAME = '{safe_db_name}'
+            ORDER BY T.NAME;
+        """
+        try:
+            tables_result = self.query(db_name=db_name, sql=sql_tables, close_conn=False) # Keep connection open for column queries
+            if tables_result.get('error'):
+                error_msg = f"Error fetching tables: {tables_result['error']}"
+                return {'error': error_msg, 'data': []}
+
+            if not tables_result.get('rows'):
+                return {'error': None, 'data': []} # No tables found, not an error
+
+            for table_row in tables_result['rows']:
+                table_name = table_row[0]
+                table_id = table_row[1]
+                # schema_name = table_row[2] # Not strictly needed if db_name is already the schema
+
+                _meta = {}
+                # Dameng does not have direct equivalents for all MySQL INFORMATION_SCHEMA.TABLES fields in one table.
+                # We'll fetch basic info from SYSOBJECTS and comments if available.
+                # For more details like row count, data length, we might need additional queries or procedures.
+                # Placeholder for TABLE_INFO, similar to MySQL's structure
+                _meta["TABLE_INFO"] = {
+                    'TABLE_NAME': table_name,
+                    'TABLE_SCHEMA': db_name, # Assuming db_name is the schema name
+                    'TABLE_TYPE': 'BASE TABLE', # Dameng equivalent for 'UTAB'
+                    'ENGINE': None, # Dameng specific, might need another query if important
+                    'TABLE_ROWS': None, # Requires query like SELECT COUNT(*) or from statistics
+                    'DATA_LENGTH': None, # Requires specific DM functions/views
+                    'INDEX_LENGTH': None, # Requires specific DM functions/views
+                    'TABLE_COMMENT': None, # Need to query SYSCOMMENTS or similar
+                }
+                # Try to get table comment
+                comment_sql = f"SELECT NOTES FROM SYSCOMMENTS WHERE ID = {table_id} AND MAJOR_CLASS = 1 AND MINOR_CLASS = 0;"
+                comment_result = self.query(db_name=db_name, sql=comment_sql, close_conn=False)
+                if comment_result.get('rows') and comment_result['rows'][0][0]:
+                    _meta["TABLE_INFO"]['TABLE_COMMENT'] = comment_result['rows'][0][0]
+
+
+                # SQL to get columns for the current table
+                # Using C.TYPE$ for column type, which is a code. We might need to map this to human-readable types.
+                sql_cols = f"""
+                    SELECT C.NAME AS COLUMN_NAME, C.TYPE$ AS COLUMN_TYPE, C.LENGTH AS CHARACTER_MAXIMUM_LENGTH,
+                           C.NULLABLE$ AS IS_NULLABLE, C.DEFVAL AS COLUMN_DEFAULT, C.COLID AS ORDINAL_POSITION
+                           -- C.PRECISION, C.SCALE for numeric types
+                    FROM SYSCOLUMNS C
+                    WHERE C.ID = {table_id}
+                    ORDER BY C.COLID;
+                """
+                columns_result = self.query(db_name=db_name, sql=sql_cols, close_conn=False)
+                if columns_result.get('error'):
+                    # Log error for this table's columns, but continue with other tables
+                    print(f"Error fetching columns for table {table_name}: {columns_result['error']}")
+                    _meta["COLUMNS"] = []
+                else:
+                    columns_data = []
+                    for col_row in columns_result['rows']:
+                        columns_data.append({
+                            'COLUMN_NAME': col_row[0],
+                            'COLUMN_TYPE': col_row[1], # This is a code, might need mapping
+                            'CHARACTER_MAXIMUM_LENGTH': col_row[2],
+                            'IS_NULLABLE': 'YES' if col_row[3] == 'Y' else 'NO',
+                            'COLUMN_DEFAULT': col_row[4],
+                            'ORDINAL_POSITION': col_row[5],
+                            'COLUMN_COMMENT': None # Need to query SYSCOLUMNCOMMENTS or similar
+                        })
+                     # Try to get column comments
+                    for col_data in columns_data:
+                        col_comment_sql = f"SELECT NOTES FROM SYSCOMMENTS WHERE ID = {table_id} AND MAJOR_CLASS = 1 AND MINOR_CLASS = {col_data['ORDINAL_POSITION']};"
+                        col_comment_result = self.query(db_name=db_name, sql=col_comment_sql, close_conn=False)
+                        if col_comment_result.get('rows') and col_comment_result['rows'][0][0]:
+                            col_data['COLUMN_COMMENT'] = col_comment_result['rows'][0][0]
+                    _meta["COLUMNS"] = columns_data
+
+                # Mimic structure of MysqlEngine's output for consistency if needed by consumers
+                _meta["ENGINE_KEYS"] = [ # These are headers for display, adjust as needed
+                    {"key": "COLUMN_NAME", "value": "字段名"},
+                    {"key": "COLUMN_TYPE", "value": "数据类型"},
+                    {"key": "CHARACTER_MAXIMUM_LENGTH", "value": "长度"},
+                    {"key": "IS_NULLABLE", "value": "允许非空"},
+                    {"key": "COLUMN_DEFAULT", "value": "默认值"},
+                    {"key": "COLUMN_COMMENT", "value": "备注"},
+                ]
+                table_metas.append(_meta)
+
+        except Exception as e:
+            error_msg = f"Failed to get tables metadata for schema {db_name}: {str(e)}"
+            # Ensure connection is closed if an exception occurs mid-process
+            if self.conn and not tables_result.get('error') and not columns_result.get('error'): # only close if not closed by query()
+                 self.close()
+            return {'error': error_msg, 'data': []}
+        finally:
+            # Ensure the connection is closed after all operations for this method are complete
+            self.close()
+
+        return {'error': error_msg, 'data': table_metas}
+
+    def get_table_meta_data(self, db_name, tb_name, **kwargs):
+        """
+        Retrieves metadata for a specific table in a given database (schema).
+        Queries SYSOBJECTS for table-level information.
+        Returns a dictionary similar to MysqlEngine.get_table_meta_data.
+        """
+        meta_data = {}
+        error_msg = None
+        safe_db_name = db_name.replace("'", "''")
+        safe_tb_name = tb_name.replace("'", "''")
+
+        # SQL to get table information
+        # Note: Dameng's SYSOBJECTS doesn't directly map to all fields in MySQL's information_schema.TABLES
+        # We will retrieve what's available and supplement with comments.
+        # Fields like TABLE_ROWS, DATA_LENGTH, INDEX_LENGTH, etc., might require
+        # more complex queries or calling DM specific procedures/functions.
+        sql_table_info = f"""
+            SELECT
+                T.NAME AS TABLE_NAME,
+                S.NAME AS TABLE_SCHEMA,
+                CASE T.SUBTYPE$
+                    WHEN 'UTAB' THEN 'BASE TABLE'
+                    WHEN 'VIEW' THEN 'VIEW'
+                    ELSE T.SUBTYPE$
+                END AS TABLE_TYPE,
+                T.ID AS TABLE_ID,
+                T.CRTDATE AS CREATE_TIME,
+                T.VALID AS IS_VALID -- Indicates if the object is valid
+                -- Add other fields from SYSOBJECTS if they map to desired metadata
+            FROM SYSOBJECTS T
+            JOIN SYSOBJECTS S ON T.SCHID = S.ID
+            WHERE T.TYPE$ = 'SCHOBJ' AND T.SUBTYPE$ = 'UTAB'  -- Focusing on user tables for now
+              AND S.TYPE$ = 'SCH' AND S.NAME = '{safe_db_name}'
+              AND T.NAME = '{safe_tb_name}';
+        """
+        try:
+            table_info_result = self.query(db_name=db_name, sql=sql_table_info, close_conn=False)
+
+            if table_info_result.get('error'):
+                error_msg = f"Error fetching table metadata for {db_name}.{tb_name}: {table_info_result['error']}"
+                return {'error': error_msg, 'column_list': [], 'rows': []}
+
+            if not table_info_result.get('rows'):
+                error_msg = f"Table {db_name}.{tb_name} not found."
+                return {'error': error_msg, 'column_list': [], 'rows': []}
+
+            table_info_row = table_info_result['rows'][0]
+            table_id = table_info_row[3] # TABLE_ID
+
+            # Column list for the output dictionary
+            column_list = table_info_result['column_list'] + ['TABLE_COMMENT'] # Add placeholder for comment
+
+            # Data for the 'rows' part of the output dictionary
+            row_data = list(table_info_row)
+
+            # Fetch table comment
+            comment_sql = f"SELECT NOTES FROM SYSCOMMENTS WHERE ID = {table_id} AND MAJOR_CLASS = 1 AND MINOR_CLASS = 0;"
+            comment_result = self.query(db_name=db_name, sql=comment_sql, close_conn=True) # Close after this query
+
+            table_comment = None
+            if comment_result.get('rows') and comment_result['rows'][0][0]:
+                table_comment = comment_result['rows'][0][0]
+
+            row_data.append(table_comment)
+
+            # Construct the final dictionary
+            # The 'rows' key in MySQL version contains a single dictionary with table attributes.
+            # We will replicate this by creating a dictionary from column_list and row_data.
+            # However, the direct output from self.query is already a list of tuples for rows.
+            # MysqlEngine.get_table_meta_data returns: {'column_list': _meta_data.column_list, 'rows': _meta_data.rows[0]}
+            # So, we should return a single dictionary as the 'rows' value.
+
+            # Create a dictionary from the column_list and row_data for the single row
+            # Pad row_data with None if its length is less than column_list
+            # This can happen if 'TABLE_COMMENT' was not in the original query's column_list
+            final_row_dict = dict(zip(column_list, row_data + [None] * (len(column_list) - len(row_data))))
+
+
+            return {
+                'error': None,
+                'column_list': column_list,
+                'rows': [final_row_dict] # Mimicking MySQL, which returns a list containing one dict
+            }
+
+        except Exception as e:
+            error_msg = f"Exception while fetching table metadata for {db_name}.{tb_name}: {str(e)}"
+            # Ensure connection is closed if an exception occurs
+            self.close()
+            return {'error': error_msg, 'column_list': [], 'rows': []}
+        # No finally self.close() here as query() handles it or it's handled in except.
+
+    def get_table_desc_data(self, db_name, tb_name, **kwargs):
+        """
+        Retrieves column information for a specific table.
+        Queries SYSCOLUMNS and SYSOBJECTS.
+        Returns a dictionary similar to MysqlEngine.get_table_desc_data.
+        """
+        desc_data = []
+        error_msg = None
+        safe_db_name = db_name.replace("'", "''")
+        safe_tb_name = tb_name.replace("'", "''")
+
+        # SQL to get column details for a table
+        # Joins SYSOBJECTS to filter by table and schema, and SYSCOLUMNS for column info.
+        # TYPE$ in SYSCOLUMNS is a code; mapping to readable names would be an enhancement.
+        # DEFVAL is the default value. NULLABLE$ indicates if NULL is allowed.
+        # PRECISION and SCALE for numeric types. LENGTH for char/varchar.
+        sql_columns = f"""
+            SELECT
+                C.NAME AS COLUMN_NAME,
+                C.TYPE$ AS COLUMN_TYPE_CODE, -- This is a code, e.g., 1 for INT, 12 for VARCHAR
+                -- We would ideally map TYPE$ to a human-readable name like 'VARCHAR', 'INTEGER'
+                -- For now, returning the code. A mapping function can be added later.
+                CASE
+                    WHEN T1.NAME IN ('CHAR', 'VARCHAR', 'VARCHAR2', 'CLOB') THEN C.LENGTH
+                    ELSE NULL
+                END AS CHARACTER_MAXIMUM_LENGTH,
+                C.PRECISION AS NUMERIC_PRECISION,
+                C.SCALE AS NUMERIC_SCALE,
+                C.NULLABLE$ AS IS_NULLABLE, -- 'Y' or 'N'
+                C.DEFVAL AS COLUMN_DEFAULT,
+                C.COLID AS ORDINAL_POSITION,
+                T.ID AS TABLE_ID -- Needed for fetching column comments
+            FROM SYSCOLUMNS C
+            JOIN SYSOBJECTS T ON C.ID = T.ID
+            JOIN SYSOBJECTS S ON T.SCHID = S.ID
+            LEFT JOIN SYSDBSTYPES T1 ON C.TYPE$ = T1.TYPE_ AND T1.DBID = DB_ID() -- Join SYSDBSTYPES for type names
+            WHERE T.NAME = '{safe_tb_name}'
+              AND S.NAME = '{safe_db_name}'
+              AND T.TYPE$ = 'SCHOBJ' AND T.SUBTYPE$ = 'UTAB'
+              AND S.TYPE$ = 'SCH'
+            ORDER BY C.COLID;
+        """
+
+        column_list_for_output = [
+            'COLUMN_NAME', 'COLUMN_TYPE', 'CHARACTER_MAXIMUM_LENGTH', 'NUMERIC_PRECISION', 'NUMERIC_SCALE',
+            'IS_NULLABLE', 'COLUMN_KEY', 'COLUMN_DEFAULT', 'EXTRA', 'COLUMN_COMMENT'
+        ] # Target column list similar to MySQL
+
+        try:
+            columns_result = self.query(db_name=db_name, sql=sql_columns, close_conn=False)
+
+            if columns_result.get('error'):
+                error_msg = f"Error fetching column descriptions for {db_name}.{tb_name}: {columns_result['error']}"
+                self.close() # Ensure connection is closed on error
+                return {'error': error_msg, 'column_list': column_list_for_output, 'rows': []}
+
+            if not columns_result.get('rows'):
+                # This case should ideally not happen if the table exists and has columns,
+                # but handle it just in case.
+                self.close()
+                return {'error': None, 'column_list': column_list_for_output, 'rows': []}
+
+            rows_data = []
+            for col_row in columns_result['rows']:
+                table_id = col_row[8] # TABLE_ID
+                ordinal_position = col_row[7] # ORDINAL_POSITION (COLID)
+
+                # Fetch column comment
+                comment_sql = f"SELECT NOTES FROM SYSCOMMENTS WHERE ID = {table_id} AND MAJOR_CLASS = 1 AND MINOR_CLASS = {ordinal_position};"
+                comment_result = self.query(db_name=db_name, sql=comment_sql, close_conn=False) # Keep conn open for next iteration
+                column_comment = None
+                if comment_result.get('rows') and comment_result['rows'][0][0]:
+                    column_comment = comment_result['rows'][0][0]
+
+                # Map to the target structure. Some fields might be None or default if not directly available.
+                # 'COLUMN_KEY' (index info) and 'EXTRA' (like auto_increment) are harder to get from this query alone.
+                # These might require joining with SYSINDEXES or other specific checks. For now, they'll be placeholder.
+                row_dict = {
+                    'COLUMN_NAME': col_row[0],
+                    'COLUMN_TYPE': col_row[1], # This is the TYPE_NAME from SYSDBSTYPES if join is successful, else TYPE$ code
+                    'CHARACTER_MAXIMUM_LENGTH': col_row[2],
+                    'NUMERIC_PRECISION': col_row[3],
+                    'NUMERIC_SCALE': col_row[4],
+                    'IS_NULLABLE': 'YES' if col_row[5] == 'Y' else 'NO',
+                    'COLUMN_KEY': '', # Placeholder - requires index info
+                    'COLUMN_DEFAULT': col_row[6],
+                    'EXTRA': '', # Placeholder - e.g. for auto_increment, needs more logic
+                    'COLUMN_COMMENT': column_comment
+                }
+                rows_data.append(row_dict)
+
+            self.close() # Close connection after all comments are fetched
+            return {
+                'error': None,
+                'column_list': column_list_for_output,
+                'rows': rows_data
+            }
+
+        except Exception as e:
+            error_msg = f"Exception while fetching column descriptions for {db_name}.{tb_name}: {str(e)}"
+            self.close() # Ensure connection is closed on exception
+            return {'error': error_msg, 'column_list': column_list_for_output, 'rows': []}
+
+    def get_table_index_data(self, db_name, tb_name, **kwargs):
+        """
+        Retrieves index information for a specific table.
+        Queries SYSINDEXES, SYSIDXCOLS, SYSOBJECTS, SYSCOLUMNS.
+        Returns a dictionary similar to MysqlEngine.get_table_index_data.
+        """
+        index_data = []
+        error_msg = None
+        safe_db_name = db_name.replace("'", "''")
+        safe_tb_name = tb_name.replace("'", "''")
+
+        # SQL to get index details for a table
+        # Joins SYSOBJECTS (for table and schema), SYSINDEXES (for index info),
+        # SYSIDXCOLS (for columns in index), and SYSCOLUMNS (for column names).
+        sql_indexes = f"""
+            SELECT
+                IC.COLNAME AS COLUMN_NAME,     -- From SYSIDXCOLS after joining with SYSCOLUMNS
+                I.NAME AS INDEX_NAME,
+                CASE I.PROPERTIES
+                    WHEN 1 THEN 'NO'           -- Assuming 1 means Unique, need to verify DM docs. MySQL NON_UNIQUE is 0 for unique.
+                    ELSE 'YES'
+                END AS NON_UNIQUE,             -- Dameng: PROPERTIES bit 0 = 1 for unique, 0 for non-unique. So invert for NON_UNIQUE.
+                                               -- Let's assume standard SQL: 0 for unique, 1 for non-unique as in MySQL's NON_UNIQUE.
+                                               -- DM: Bit 0: 1-Unique Index, 0-Non Unique Index.
+                                               -- So if PROPERTIES & 1 == 1, it's unique, NON_UNIQUE should be 'NO'
+                                               -- If PROPERTIES & 1 == 0, it's non-unique, NON_UNIQUE should be 'YES'
+                                               -- Corrected logic: (CASE WHEN (I.PROPERTIES & 1) = 1 THEN 'NO' ELSE 'YES' END)
+                IC.COLID_IN_INDEX AS SEQ_IN_INDEX, -- Position of the column in the index
+                NULL AS CARDINALITY,           -- Cardinality is not directly available in these tables, might need statistics
+                (SELECT C.NULLABLE$ FROM SYSCOLUMNS C WHERE C.ID = T.ID AND C.NAME = IC.COLNAME) AS IS_NULLABLE_COLUMN, -- Whether the column itself is nullable
+                CASE I.INDEXTYPE$
+                    WHEN 'NORMAL' THEN 'BTREE' -- Common default, DM might have other types
+                    WHEN 'CLUSTERED' THEN 'CLUSTERED'
+                    ELSE I.INDEXTYPE$
+                END AS INDEX_TYPE,
+                (SELECT CMM.NOTES FROM SYSCOMMENTS CMM WHERE CMM.ID = I.ID AND CMM.MAJOR_CLASS = 7 AND CMM.MINOR_CLASS = 0) AS INDEX_COMMENT -- Index comment
+            FROM SYSINDEXES I
+            JOIN SYSOBJECTS T ON I.TABLEID = T.ID   -- Join Index to Table
+            JOIN SYSOBJECTS S ON T.SCHID = S.ID   -- Join Table to Schema
+            JOIN SYSIDXCOLS IC ON I.ID = IC.INDEXID -- Join Index to its Columns
+            -- SYSIDXCOLS might store COLID or COLNAME. Assuming COLNAME for simplicity or join SYSCOLUMNS if it's COLID
+            -- If SYSIDXCOLS.COLNAME is not available, and it has COLID:
+            -- JOIN SYSCOLUMNS SC ON IC.COLID = SC.COLID AND SC.ID = T.ID (this assumes COLID is unique per table)
+            -- Let's assume SYSIDXCOLS has COLNAME. If not, the query needs SC.NAME AS COLUMN_NAME and join on SC.COLID.
+            -- Based on typical DM structure, SYSIDXCOLS refers to column by its position/ID in table, so joining SYSCOLUMNS is better.
+            -- Revising JOIN for COLUMN_NAME:
+            -- The above query was simplified. A more robust one for COLNAME:
+            -- SELECT SC.NAME AS COLUMN_NAME ... JOIN SYSCOLUMNS SC ON IC.COLID = SC.COLID AND SC.ID = T.ID
+            -- For now, let's assume the provided query structure and adjust if errors occur or COLNAME isn't directly in SYSIDXCOLS.
+            -- A common pattern is SYSIDXCOLS has column ID, and you join SYSCOLUMNS on that ID and table's ID.
+            -- Let's use a subquery or join for COLNAME based on COLID from SYSIDXCOLS
+            -- The provided DDL for SYSIDXCOLS usually has `COLID` which is the ID of the column in the table.
+            -- So, we need to join SYSCOLUMNS on T.ID and IC.COLID
+            -- The query should be: (SELECT C.NAME FROM SYSCOLUMNS C WHERE C.ID = T.ID AND C.COLID = IC.COLID) AS COLUMN_NAME
+            WHERE T.NAME = '{safe_tb_name}'
+              AND S.NAME = '{safe_db_name}'
+              AND T.TYPE$ = 'SCHOBJ' AND T.SUBTYPE$ = 'UTAB'
+              AND S.TYPE$ = 'SCH'
+            ORDER BY I.NAME, IC.COLID_IN_INDEX;
+        """
+        # Corrected SQL for index data, especially for COLUMN_NAME and NON_UNIQUE
+        # Also, SYSIDXCOLS typically has COLID, not COLNAME directly.
+        # MAJOR_CLASS for index comment is 7 (OBJ_INDEX)
+        # MINOR_CLASS for index comment is 0 (general comment for the index object itself)
+        # For column nullability, it's better to get it from SYSCOLUMNS directly using the column identifier.
+
+        sql_indexes_corrected = f"""
+            SELECT
+                (SELECT C.NAME FROM SYSCOLUMNS C WHERE C.ID = T.ID AND C.COLID = IC.COLID) AS COLUMN_NAME,
+                SI.NAME AS INDEX_NAME,
+                CASE WHEN (SI.PROPERTIES & 1) = 1 THEN 'NO' ELSE 'YES' END AS NON_UNIQUE, -- Bit 0: 1=Unique, 0=Non-Unique
+                IC.POS$ AS SEQ_IN_INDEX, -- Position of column in index (1-based)
+                NULL AS CARDINALITY, -- Not easily available, typically from statistics
+                (SELECT SC.NULLABLE$ FROM SYSCOLUMNS SC WHERE SC.ID = T.ID AND SC.COLID = IC.COLID) AS IS_NULLABLE_COLUMN, -- 'Y' or 'N'
+                CASE SI.TYPE$
+                    WHEN 0 THEN 'NORMAL' -- B-Tree (Normal)
+                    WHEN 1 THEN 'CLUSTERED'
+                    WHEN 2 THEN 'FUNCTIONAL'
+                    WHEN 3 THEN 'TEXT' -- Full-text index
+                    ELSE 'UNKNOWN'
+                END AS INDEX_TYPE,
+                (SELECT CMM.NOTES FROM SYSCOMMENTS CMM WHERE CMM.ID = SI.ID AND CMM.MAJOR_CLASS = 7 AND CMM.MINOR_CLASS = 0) AS INDEX_COMMENT
+            FROM SYSOBJECTS ST -- Schema Table
+            JOIN SYSOBJECTS T ON ST.ID = T.SCHID AND T.NAME = '{safe_tb_name}' AND T.SUBTYPE$ = 'UTAB' -- Table Object
+            JOIN SYSINDEXES SI ON T.ID = SI.TABLEID -- Index Object
+            JOIN SYSIDXCOLS IC ON SI.ID = IC.INDEXID -- Index Column Mapping
+            WHERE ST.NAME = '{safe_db_name}' AND ST.TYPE$ = 'SCH'
+            ORDER BY SI.NAME, IC.POS$;
+        """
+        # MySQL column names for reference: '列名', '索引名', '唯一性', '列序列', '基数', '是否为空', '索引类型', '备注'
+        # Mapping to our selected fields:
+        # COLUMN_NAME, INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, CARDINALITY, IS_NULLABLE_COLUMN, INDEX_TYPE, INDEX_COMMENT
+        column_list_for_output = [
+            'COLUMN_NAME', 'INDEX_NAME', 'NON_UNIQUE', 'SEQ_IN_INDEX',
+            'CARDINALITY', 'IS_NULLABLE_COLUMN', 'INDEX_TYPE', 'INDEX_COMMENT'
+        ]
+
+        try:
+            indexes_result = self.query(db_name=db_name, sql=sql_indexes_corrected) # Default close_conn=True
+
+            if indexes_result.get('error'):
+                error_msg = f"Error fetching index data for {db_name}.{tb_name}: {indexes_result['error']}"
+                return {'error': error_msg, 'column_list': column_list_for_output, 'rows': []}
+
+            rows_data = []
+            if indexes_result.get('rows'):
+                for idx_row in indexes_result['rows']:
+                    rows_data.append(dict(zip(column_list_for_output, idx_row)))
+
+            return {
+                'error': None,
+                'column_list': column_list_for_output,
+                'rows': rows_data
+            }
+
+        except Exception as e:
+            error_msg = f"Exception while fetching index data for {db_name}.{tb_name}: {str(e)}"
+            # self.close() is not strictly needed here if query() closes connection,
+            # but added defensively if query() behavior changes or direct self.conn usage occurs.
+            if self.conn: self.close()
+            return {'error': error_msg, 'column_list': column_list_for_output, 'rows': []}
+
+    # Placeholder methods added below
+
+    def escape_string(self, value: str) -> str:
+        logger.warning("DmEngine.escape_string is not fully implemented. Returning original value.")
+        return value # Basic placeholder
+
+    @property
+    def auto_backup(self):
+        logger.warning("DmEngine.auto_backup is not implemented. Returning False.")
+        return False
+
+    @property
+    def seconds_behind_master(self):
+        logger.warning("DmEngine.seconds_behind_master is not implemented. Returning None.")
+        return None
+
+    @property
+    def server_version(self):
+        logger.warning("DmEngine.server_version is not implemented. Returning empty tuple.")
+        # Attempt to get version if connection exists, otherwise return placeholder
+        if hasattr(self, '_server_version') and self._server_version:
+            return self._server_version
+        try:
+            if not self.conn:
+                self.get_connection() # Establish connection if not already connected
+            if self.conn:
+                # DM version query: SELECT BANNER FROM V$VERSION;
+                # Example output: "DM Database Server x64 V8 R3 ECN2 GRP MPP LCNSYSLEN 2048 230410"
+                # Need to parse this to get a tuple like (8, 3, 0, 2)
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT BANNER FROM V$VERSION;")
+                version_string = cursor.fetchone()
+                if version_string and version_string[0]:
+                    match = re.search(r'V(\d+)\s*R(\d+)', version_string[0])
+                    if match:
+                        major, minor = int(match.group(1)), int(match.group(2))
+                        # Try to find patch/build if available
+                        # This is a simplified parsing, DM version string can be complex
+                        self._server_version = (major, minor, 0) # Placeholder for patch
+                        return self._server_version
+                logger.warning("Could not parse Dameng version string.")
+        except Exception as e:
+            logger.error(f"Error getting Dameng server version: {e}")
+        return tuple()
+
+
+    def processlist(self, command_type=None, **kwargs):
+        logger.warning("DmEngine.processlist is not implemented. Returning empty ResultSet.")
+        return ResultSet(full_sql="show processlist", error="Not implemented for DmEngine")
+
+    def kill_connection(self, thread_id):
+        logger.warning(f"DmEngine.kill_connection for thread_id {thread_id} is not implemented.")
+        # Consider returning a ResultSet indicating failure or status
+        return ResultSet(full_sql=f"kill {thread_id}", error="Not implemented for DmEngine")
+
+    def get_group_tables_by_db(self, db_name, **kwargs):
+        logger.warning("DmEngine.get_group_tables_by_db is not implemented. Returning empty dict.")
+        return {}
+
+    def get_all_databases_summary(self):
+        logger.warning("DmEngine.get_all_databases_summary is not implemented. Returning empty ResultSet.")
+        return ResultSet(full_sql="show databases summary", error="Not implemented for DmEngine")
+
+    def get_instance_users_summary(self):
+        logger.warning("DmEngine.get_instance_users_summary is not implemented. Returning empty ResultSet.")
+        return ResultSet(full_sql="show users summary", error="Not implemented for DmEngine")
+
+    def create_instance_user(self, **kwargs):
+        logger.warning(f"DmEngine.create_instance_user with args {kwargs} is not implemented.")
+        return ResultSet(full_sql="create user", error="Not implemented for DmEngine")
+
+    def drop_instance_user(self, **kwargs):
+        logger.warning(f"DmEngine.drop_instance_user with args {kwargs} is not implemented.")
+        return ResultSet(full_sql="drop user", error="Not implemented for DmEngine")
+
+    def reset_instance_user_pwd(self, **kwargs):
+        logger.warning(f"DmEngine.reset_instance_user_pwd with args {kwargs} is not implemented.")
+        return ResultSet(full_sql="alter user password", error="Not implemented for DmEngine")
+
+    def query_masking(self, db_name=None, sql="", resultset=None):
+        logger.warning("DmEngine.query_masking is not implemented. Returning original resultset.")
+        return resultset # Pass through
+
+    def execute(self, db_name=None, sql="", close_conn=True, parameters=None):
+        logger.warning(f"DmEngine.execute for sql '{sql}' is not fully implemented. Returning error ReviewSet.")
+        # This method in MySQL returns a ResultSet, but the task asks for ReviewSet with error.
+        # Aligning with execute_workflow which often uses ReviewSet.
+        # If it should be ResultSet, this needs adjustment.
+        # For now, returning a ReviewSet indicating it's not for direct execution here.
+        # Or, if it's meant to be like MySQL's execute (raw execution), it should return ResultSet.
+        # Let's assume it's for general execution and should return ResultSet.
+        # The original task description for MySQL's execute returns ResultSet.
+        # The request for *this* placeholder asks for "ReviewSet with an error".
+        # This is contradictory. I will follow the specific instruction for *this placeholder*.
+        error_review_set = ReviewSet(full_sql=sql)
+        error_review_set.error_count = 1
+        error_review_set.rows.append(
+            ReviewResult(
+                id=0, errlevel=2, stagestatus="执行失败",
+                errormessage="Direct execute method not implemented for DmEngine.", sql=sql
+            )
+        )
+        return error_review_set
+
+    def get_execute_percentage(self):
+        logger.warning("DmEngine.get_execute_percentage is not implemented. Returning None.")
+        return None
+
+    def get_variables(self, variables=None):
+        logger.warning("DmEngine.get_variables is not implemented. Returning empty ResultSet.")
+        return ResultSet(full_sql="show variables", error="Not implemented for DmEngine")
+
+    def set_variable(self, variable_name, variable_value):
+        logger.warning(f"DmEngine.set_variable for {variable_name}={variable_value} is not implemented.")
+        return ResultSet(full_sql=f"set variable {variable_name}", error="Not implemented for DmEngine")

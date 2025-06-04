@@ -76,3 +76,9 @@ class SQLTuning:
         "TMP_TABLE_SIZE",
         "WAIT_TIMEOUT",
     ]
+
+# Database types that support reading instance parameters
+CAN_READ_INSTANCE_PARAM_DB_TYPE = ['DM']
+
+# Database types that support editing instance parameters
+CAN_EDIT_INSTANCE_PARAM_DB_TYPE = ['DM']
