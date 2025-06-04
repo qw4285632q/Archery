@@ -1,9 +1,10 @@
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 
 from sql.engines.dm import DmEngine
 from sql.models import Instance
 from sql.engines.models import ReviewSet, ReviewResult, ResultSet
+import sqlparse # Ensure sqlparse is available for tests if we directly use it here, though DmEngine uses it internally.
 
 class TestDmEngine(unittest.TestCase):
 
@@ -54,7 +55,7 @@ class TestDmEngine(unittest.TestCase):
 
     def test_get_connection_failure(self):
         # Arrange
-        self.mock_dmpython.connect.reset_mock(return_value=True, side_effect=True) # Reset previous mocks if any
+        self.mock_dmpython.connect.reset_mock(return_value=True, side_effect=True)
         self.mock_dmpython.connect.side_effect = Exception("Connection failed")
         engine = DmEngine(instance=self.instance)
 
@@ -120,7 +121,7 @@ class TestDmEngine(unittest.TestCase):
         # Assert
         self.mock_dmpython.connect.assert_called_once()
         self.mock_conn.cursor.assert_called_once()
-        self.mock_cursor.execute.assert_called_once_with(sql + " FETCH FIRST 0 ROWS ONLY") # limit_num defaults to 0
+        self.mock_cursor.execute.assert_called_once_with(sql + " FETCH FIRST 0 ROWS ONLY")
         self.assertEqual(result['column_list'], ['name'])
         self.assertEqual(result['rows'], [('user1',), ('user2',)])
         self.assertEqual(result['effect_row'], 2)
@@ -162,7 +163,6 @@ class TestDmEngine(unittest.TestCase):
     # Tests for get_all_databases
     def test_get_all_databases_success(self):
         engine = DmEngine(instance=self.instance)
-        # Mock the engine's own query method
         engine.query = MagicMock(return_value={'rows': [('db1',), ('db2',)], 'column_list': ['NAME'], 'error': None})
         result = engine.get_all_databases()
         self.assertIsNone(result['error'])
@@ -205,7 +205,7 @@ class TestDmEngine(unittest.TestCase):
     def test_get_all_tables_no_data(self):
         db_name = "test_schema"
         engine = DmEngine(instance=self.instance)
-        engine.query = MagicMock(return_value={'rows': [], 'error': None}) # No error, just no tables
+        engine.query = MagicMock(return_value={'rows': [], 'error': None})
         result = engine.get_all_tables(db_name=db_name)
         self.assertIsNone(result['error'])
         self.assertEqual(result['data'], [])
@@ -292,10 +292,6 @@ class TestDmEngine(unittest.TestCase):
     def test_get_tables_metas_data_success(self):
         db_name = "test_db"
         engine = DmEngine(instance=self.instance)
-
-        # Mock sequence of query calls made by get_tables_metas_data
-        # 1. Get tables
-        # 2. For each table: get table comment, get columns, for each column get comment
         table_rows = [('table1', 101, db_name), ('table2', 102, db_name)]
         table1_comment_rows = [("Table 1 comment",)]
         table1_col_rows = [('id', 'INT', 10, 'N', None, 1), ('data', 'TEXT', 1000, 'Y', "'default'", 2)]
@@ -307,22 +303,16 @@ class TestDmEngine(unittest.TestCase):
 
         engine.query = MagicMock()
         engine.query.side_effect = [
-            # Call 1: Get tables
             {'rows': table_rows, 'column_list': ['TABLE_NAME', 'TABLE_ID', 'TABLE_SCHEMA'], 'error': None},
-            # table1 mocks
-            {'rows': table1_comment_rows, 'error': None}, # table1 comment
-            {'rows': table1_col_rows, 'error': None},   # table1 columns
-            {'rows': table1_col1_comment_rows, 'error': None}, # table1 col1 comment
-            {'rows': table1_col2_comment_rows, 'error': None}, # table1 col2 comment
-            # table2 mocks
-            {'rows': table2_comment_rows, 'error': None}, # table2 comment
-            {'rows': table2_col_rows, 'error': None},   # table2 columns
-            {'rows': table2_col1_comment_rows, 'error': None}, # table2 col1 comment
+            {'rows': table1_comment_rows, 'error': None},
+            {'rows': table1_col_rows, 'error': None},
+            {'rows': table1_col1_comment_rows, 'error': None},
+            {'rows': table1_col2_comment_rows, 'error': None},
+            {'rows': table2_comment_rows, 'error': None},
+            {'rows': table2_col_rows, 'error': None},
+            {'rows': table2_col1_comment_rows, 'error': None},
         ]
-
-        # Mock close method, as it's called explicitly in the finally block
         engine.close = MagicMock()
-
         result = engine.get_tables_metas_data(db_name=db_name)
         self.assertIsNone(result['error'])
         self.assertEqual(len(result['data']), 2)
@@ -338,7 +328,7 @@ class TestDmEngine(unittest.TestCase):
     def test_get_tables_metas_data_no_tables(self):
         db_name = "test_db"
         engine = DmEngine(instance=self.instance)
-        engine.query = MagicMock(return_value={'rows': [], 'error': None}) # No tables
+        engine.query = MagicMock(return_value={'rows': [], 'error': None})
         engine.close = MagicMock()
         result = engine.get_tables_metas_data(db_name=db_name)
         self.assertIsNone(result['error'])
@@ -349,15 +339,10 @@ class TestDmEngine(unittest.TestCase):
         db_name = "test_db"
         engine = DmEngine(instance=self.instance)
         engine.query = MagicMock(return_value={'rows': [], 'error': "DB error listing tables"})
-        engine.close = MagicMock() # Should still be called in finally
+        engine.close = MagicMock()
         result = engine.get_tables_metas_data(db_name=db_name)
         self.assertTrue("Error fetching tables" in result['error'])
         self.assertEqual(result['data'], [])
-        # engine.close might or might not be called depending on where the error occurs
-        # In the current implementation, if the first query fails, close won't be called by the finally block in get_tables_metas_data itself
-        # because self.conn might not be set by the failing query call.
-        # This depends on the internal behavior of self.query and its close_conn logic.
-        # For this test, let's assume if the first query fails, the main method's finally block calls close.
         engine.close.assert_called_once()
 
 
@@ -371,12 +356,10 @@ class TestDmEngine(unittest.TestCase):
 
         engine.query = MagicMock()
         engine.query.side_effect = [
-            {'rows': [table_info_row], 'column_list': column_list, 'error': None}, # Table info query
-            {'rows': [comment_row], 'error': None} # Comment query
+            {'rows': [table_info_row], 'column_list': column_list, 'error': None},
+            {'rows': [comment_row], 'error': None}
         ]
-
         result = engine.get_table_meta_data(db_name, tb_name)
-
         self.assertIsNone(result['error'])
         self.assertEqual(len(result['rows']), 1)
         expected_row_dict = dict(zip(column_list + ['TABLE_COMMENT'], list(table_info_row) + [comment_row[0]]))
@@ -386,62 +369,44 @@ class TestDmEngine(unittest.TestCase):
     def test_get_table_meta_data_table_not_found(self):
         db_name, tb_name = "test_db", "non_existent_table"
         engine = DmEngine(instance=self.instance)
-        engine.query = MagicMock(return_value={'rows': [], 'error': None}) # Table info query returns no rows
-        engine.close = MagicMock()
-
+        engine.query = MagicMock(return_value={'rows': [], 'error': None})
         result = engine.get_table_meta_data(db_name, tb_name)
-
         self.assertTrue(f"Table {db_name}.{tb_name} not found" in result['error'])
         self.assertEqual(result['rows'], [])
-        # If query returns no rows, the first query call itself would use close_conn=False,
-        # but the method get_table_meta_data doesn't have its own finally close for this specific path.
-        # This means self.close() is not guaranteed. Let's adjust DmEngine or test.
-        # DmEngine.get_table_meta_data uses close_conn=True for comment query, so that one handles it.
-        # If the first query fails (no rows), no second query is made.
-        # No explicit self.close() in the "not found" path of get_table_meta_data.
-        # Let's assume engine.query handles its own connection state or this is okay.
-        # For now, not asserting engine.close() here.
 
     def test_get_table_meta_data_error_fetching_info(self):
         db_name, tb_name = "test_db", "test_table"
         engine = DmEngine(instance=self.instance)
         engine.query = MagicMock(return_value={'error': "DB error fetching table info"})
-        engine.close = MagicMock() # Should be called in except block of get_table_meta_data
-
+        engine.close = MagicMock()
         result = engine.get_table_meta_data(db_name, tb_name)
-
         self.assertTrue("Error fetching table metadata" in result['error'])
         self.assertEqual(result['rows'], [])
-        engine.close.assert_called_once() # From the except block
+        engine.close.assert_called_once()
 
     # Tests for get_table_desc_data
     def test_get_table_desc_data_success(self):
         db_name, tb_name = "test_db", "test_table"
         engine = DmEngine(instance=self.instance)
-
-        # COL_NAME, TYPE_CODE, CHAR_MAX_LEN, NUM_PREC, NUM_SCALE, IS_NULL, DEF_VAL, ORD_POS, TBL_ID
         col_rows_from_query = [
             ('id', 1, None, 10, 0, 'N', None, 1, 101),
             ('name', 12, 255, None, None, 'Y', "'anon'", 2, 101)
         ]
-        # Comments for each column
         id_comment = ("Primary key",)
         name_comment = ("User name",)
 
         engine.query = MagicMock()
         engine.query.side_effect = [
-            {'rows': col_rows_from_query, 'error': None}, # Column details query
-            {'rows': [id_comment], 'error': None},      # Comment for 'id'
-            {'rows': [name_comment], 'error': None}     # Comment for 'name'
+            {'rows': col_rows_from_query, 'error': None},
+            {'rows': [id_comment], 'error': None},
+            {'rows': [name_comment], 'error': None}
         ]
         engine.close = MagicMock()
-
         result = engine.get_table_desc_data(db_name, tb_name)
-
         self.assertIsNone(result['error'])
         self.assertEqual(len(result['rows']), 2)
         self.assertEqual(result['rows'][0]['COLUMN_NAME'], 'id')
-        self.assertEqual(result['rows'][0]['COLUMN_TYPE'], 1) # Type code for now
+        self.assertEqual(result['rows'][0]['COLUMN_TYPE'], 1)
         self.assertEqual(result['rows'][0]['COLUMN_COMMENT'], "Primary key")
         self.assertEqual(result['rows'][1]['COLUMN_NAME'], 'name')
         self.assertEqual(result['rows'][1]['CHARACTER_MAXIMUM_LENGTH'], 255)
@@ -450,31 +415,27 @@ class TestDmEngine(unittest.TestCase):
             'COLUMN_NAME', 'COLUMN_TYPE', 'CHARACTER_MAXIMUM_LENGTH', 'NUMERIC_PRECISION', 'NUMERIC_SCALE',
             'IS_NULLABLE', 'COLUMN_KEY', 'COLUMN_DEFAULT', 'EXTRA', 'COLUMN_COMMENT'
         ])
-        engine.close.assert_called_once() # Called after all comments fetched
+        engine.close.assert_called_once()
 
     def test_get_table_desc_data_error_fetching_cols(self):
         db_name, tb_name = "test_db", "test_table"
         engine = DmEngine(instance=self.instance)
         engine.query = MagicMock(return_value={'error': "DB error fetching columns"})
         engine.close = MagicMock()
-
         result = engine.get_table_desc_data(db_name, tb_name)
         self.assertTrue("Error fetching column descriptions" in result['error'])
-        engine.close.assert_called_once() # From the main query error path
+        engine.close.assert_called_once()
 
     # Tests for get_table_index_data
     def test_get_table_index_data_success(self):
         db_name, tb_name = "test_db", "test_table"
         engine = DmEngine(instance=self.instance)
-        # COL_NAME, IDX_NAME, NON_UNIQUE, SEQ_IN_IDX, CARDINALITY, IS_NULL_COL, IDX_TYPE, IDX_COMMENT
         index_rows_from_query = [
             ('id', 'pk_users', 'NO', 1, None, 'N', 'NORMAL', 'Primary key index'),
             ('email', 'idx_email_unique', 'NO', 1, None, 'N', 'NORMAL', None)
         ]
         engine.query = MagicMock(return_value={'rows': index_rows_from_query, 'error': None})
-
         result = engine.get_table_index_data(db_name, tb_name)
-
         self.assertIsNone(result['error'])
         self.assertEqual(len(result['rows']), 2)
         self.assertEqual(result['rows'][0]['COLUMN_NAME'], 'id')
@@ -482,18 +443,16 @@ class TestDmEngine(unittest.TestCase):
         self.assertEqual(result['rows'][0]['NON_UNIQUE'], 'NO')
         self.assertEqual(result['rows'][0]['INDEX_COMMENT'], 'Primary key index')
         self.assertEqual(result['rows'][1]['INDEX_NAME'], 'idx_email_unique')
-        self.assertIsNone(result['rows'][1]['INDEX_COMMENT']) # No comment for second index
+        self.assertIsNone(result['rows'][1]['INDEX_COMMENT'])
         self.assertEqual(result['column_list'], [
             'COLUMN_NAME', 'INDEX_NAME', 'NON_UNIQUE', 'SEQ_IN_INDEX',
             'CARDINALITY', 'IS_NULLABLE_COLUMN', 'INDEX_TYPE', 'INDEX_COMMENT'
         ])
-        # engine.query uses close_conn=True by default, so no explicit engine.close() here.
 
     def test_get_table_index_data_no_indexes(self):
         db_name, tb_name = "test_db", "table_no_indexes"
         engine = DmEngine(instance=self.instance)
-        engine.query = MagicMock(return_value={'rows': [], 'error': None}) # No indexes found
-
+        engine.query = MagicMock(return_value={'rows': [], 'error': None})
         result = engine.get_table_index_data(db_name, tb_name)
         self.assertIsNone(result['error'])
         self.assertEqual(result['rows'], [])
@@ -502,16 +461,135 @@ class TestDmEngine(unittest.TestCase):
         db_name, tb_name = "test_db", "test_table"
         engine = DmEngine(instance=self.instance)
         engine.query = MagicMock(return_value={'error': "DB error fetching indexes"})
-        engine.close = MagicMock() # For the except block in get_table_index_data
-
         result = engine.get_table_index_data(db_name, tb_name)
         self.assertTrue("Error fetching index data" in result['error'])
-        # engine.close() in get_table_index_data is only called in the final exception handler
-        # if self.conn exists. If query() itself fails and closes/nullifies self.conn,
-        # this might not be called. This depends on query() implementation.
-        # Let's assume for an error from query(), self.conn might be None.
-        # If the error is *within* get_table_index_data but after query, self.conn might exist.
-        # For now, not asserting engine.close() as its call is conditional.
+
+    # Tests for DmEngine.execute
+    def test_execute_single_statement_success(self):
+        sql = "CREATE TABLE test_table (id INT);"
+        self.mock_cursor.rowcount = 0
+        engine = DmEngine(instance=self.instance)
+        # engine.get_connection = MagicMock(return_value=self.mock_conn) # Already mocked in setUp
+
+        review_set = engine.execute(db_name='testdb', sql=sql)
+
+        self.assertEqual(review_set.error_count, 0)
+        self.assertEqual(len(review_set.rows), 1)
+        self.assertEqual(review_set.rows[0].sql, sql.strip())
+        self.assertEqual(review_set.rows[0].errlevel, 0)
+        self.assertEqual(review_set.rows[0].stagestatus, 'Execute Successfully')
+        self.mock_cursor.execute.assert_called_once_with(sql.strip())
+        self.mock_conn.cursor.assert_called_once()
+        self.mock_cursor.close.assert_called_once()
+        self.mock_conn.close.assert_called_once() # Because close_conn defaults to True
+
+    def test_execute_multiple_statements_success(self):
+        sql = "CREATE TABLE table1 (id INT); INSERT INTO table1 VALUES (1);"
+        # Mock rowcounts for each statement if needed by logic, DmEngine.execute sets affected_rows
+        self.mock_cursor.rowcount = MagicMock()
+        self.mock_cursor.rowcount.side_effect = [0, 1] # DDL, then DML
+
+        engine = DmEngine(instance=self.instance)
+
+        review_set = engine.execute(db_name='testdb', sql=sql)
+
+        self.assertEqual(review_set.error_count, 0)
+        self.assertEqual(len(review_set.rows), 2)
+
+        parsed_stmts = sqlparse.split(sql)
+        self.assertEqual(review_set.rows[0].sql, parsed_stmts[0].strip())
+        self.assertEqual(review_set.rows[0].errlevel, 0)
+        self.assertEqual(review_set.rows[0].affected_rows, 0)
+        self.assertEqual(review_set.rows[0].stagestatus, 'Execute Successfully')
+
+        self.assertEqual(review_set.rows[1].sql, parsed_stmts[1].strip())
+        self.assertEqual(review_set.rows[1].errlevel, 0)
+        self.assertEqual(review_set.rows[1].affected_rows, 1)
+        self.assertEqual(review_set.rows[1].stagestatus, 'Execute Successfully')
+
+        self.assertEqual(self.mock_cursor.execute.call_count, 2)
+        self.mock_cursor.execute.assert_has_calls([call(parsed_stmts[0].strip()), call(parsed_stmts[1].strip())])
+        self.assertEqual(self.mock_conn.cursor.call_count, 2)
+        self.assertEqual(self.mock_cursor.close.call_count, 2)
+        self.mock_conn.close.assert_called_once()
+
+
+    def test_execute_multiple_statements_one_failure(self):
+        sql = "CREATE TABLE table1 (id INT); INVALID SQL; INSERT INTO table1 VALUES (1);"
+        parsed_stmts = sqlparse.split(sql)
+
+        # Simulate failure for the second statement
+        # Need to reset cursor mock for side_effect on execute
+        self.mock_cursor.execute.side_effect = [
+            None,  # CREATE TABLE success
+            Exception("Syntax error near INVALID"), # INVALID SQL failure
+            None   # INSERT success (DmEngine executes all statements)
+        ]
+        # Define rowcounts for successful executions
+        # This needs careful handling if rowcount is accessed when side_effect is also Exception
+        # Let's make rowcount a MagicMock that can also have side_effects or return_value
+        self.mock_cursor.rowcount = MagicMock()
+        self.mock_cursor.rowcount.side_effect = [0, 1] # For 1st and 3rd successful statements
+
+        engine = DmEngine(instance=self.instance)
+
+        review_set = engine.execute(db_name='testdb', sql=sql)
+
+        self.assertEqual(review_set.error_count, 1)
+        self.assertEqual(len(review_set.rows), 3) # All 3 statements are processed
+
+        # Check first statement (CREATE)
+        self.assertEqual(review_set.rows[0].sql, parsed_stmts[0].strip())
+        self.assertEqual(review_set.rows[0].errlevel, 0)
+        self.assertEqual(review_set.rows[0].affected_rows, 0)
+        self.assertEqual(review_set.rows[0].stagestatus, 'Execute Successfully')
+
+        # Check second statement (INVALID SQL)
+        self.assertEqual(review_set.rows[1].sql, parsed_stmts[1].strip())
+        self.assertEqual(review_set.rows[1].errlevel, 2)
+        self.assertIn("Syntax error near INVALID", review_set.rows[1].errormessage)
+        self.assertEqual(review_set.rows[1].stagestatus, 'Execute Failed')
+
+        # Check third statement (INSERT) - DmEngine continues on error
+        self.assertEqual(review_set.rows[2].sql, parsed_stmts[2].strip())
+        self.assertEqual(review_set.rows[2].errlevel, 0) # Assuming it would succeed if reached
+        self.assertEqual(review_set.rows[2].affected_rows, 1)
+        self.assertEqual(review_set.rows[2].stagestatus, 'Execute Successfully')
+
+        self.assertEqual(self.mock_cursor.execute.call_count, 3)
+        self.assertEqual(self.mock_conn.cursor.call_count, 3)
+        self.assertEqual(self.mock_cursor.close.call_count, 3) # Cursor closed for each attempt
+        self.mock_conn.close.assert_called_once()
+
+
+    def test_execute_connection_failure(self):
+        engine = DmEngine(instance=self.instance)
+        # Override setUp's successful connection mock for this test
+        engine.get_connection = MagicMock(return_value=None)
+
+        sql = "SELECT 1;"
+        review_set = engine.execute(db_name='testdb', sql=sql)
+
+        self.assertEqual(review_set.error_count, 1)
+        self.assertEqual(len(review_set.rows), 1)
+        self.assertEqual(review_set.rows[0].sql, sql) # The full SQL block
+        self.assertEqual(review_set.rows[0].errlevel, 2)
+        self.assertEqual(review_set.rows[0].errormessage, "Failed to establish database connection.")
+        self.assertEqual(review_set.rows[0].stagestatus, 'Execute Failed')
+        self.assertIsNone(review_set.error) # This is the overall ReviewSet error, which is set in this case
+                                            # Let's check the ReviewSet.error attribute
+        self.assertEqual(review_set.error, "Failed to establish database connection.")
+
+
+    def test_execute_empty_sql_string(self):
+        engine = DmEngine(instance=self.instance)
+        review_set = engine.execute(db_name='testdb', sql="   ") # Empty or whitespace only
+
+        self.assertEqual(review_set.error_count, 0)
+        self.assertEqual(len(review_set.rows), 0) # No statements to execute
+        self.assertIsNone(review_set.error)
+        self.mock_conn.cursor.assert_not_called() # No cursors should be made
+        self.mock_conn.close.assert_called_once() # Connection is made, then closed
 
 
 if __name__ == '__main__':

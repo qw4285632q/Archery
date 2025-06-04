@@ -1,6 +1,7 @@
 import dmPython # Import the Dameng Python driver
 import re # For regex checks in filter_sql
 import logging # For logging unimplemented methods
+import sqlparse # For splitting SQL statements
 
 from sql.engines import EngineBase
 from .models import ReviewResult, ReviewSet, ResultSet # Ensure ResultSet is imported
@@ -8,6 +9,8 @@ from .models import ReviewResult, ReviewSet, ResultSet # Ensure ResultSet is imp
 logger = logging.getLogger(__name__)
 
 class DmEngine(EngineBase):
+    name = "DM"
+    info = "Dameng Engine"
     """Engine for Dameng Database (DM)."""
 
     def get_connection(self, db_name=None):
@@ -777,26 +780,88 @@ class DmEngine(EngineBase):
         logger.warning("DmEngine.query_masking is not implemented. Returning original resultset.")
         return resultset # Pass through
 
-    def execute(self, db_name=None, sql="", close_conn=True, parameters=None):
-        logger.warning(f"DmEngine.execute for sql '{sql}' is not fully implemented. Returning error ReviewSet.")
-        # This method in MySQL returns a ResultSet, but the task asks for ReviewSet with error.
-        # Aligning with execute_workflow which often uses ReviewSet.
-        # If it should be ResultSet, this needs adjustment.
-        # For now, returning a ReviewSet indicating it's not for direct execution here.
-        # Or, if it's meant to be like MySQL's execute (raw execution), it should return ResultSet.
-        # Let's assume it's for general execution and should return ResultSet.
-        # The original task description for MySQL's execute returns ResultSet.
-        # The request for *this* placeholder asks for "ReviewSet with an error".
-        # This is contradictory. I will follow the specific instruction for *this placeholder*.
-        error_review_set = ReviewSet(full_sql=sql)
-        error_review_set.error_count = 1
-        error_review_set.rows.append(
-            ReviewResult(
-                id=0, errlevel=2, stagestatus="执行失败",
-                errormessage="Direct execute method not implemented for DmEngine.", sql=sql
-            )
-        )
-        return error_review_set
+    def execute(self, db_name=None, sql='', close_conn=True, parameters=None): # Parameters might not be used by dmPython in this way
+        result = ReviewSet(full_sql=sql)
+        conn = None
+        try:
+            conn = self.get_connection(db_name=db_name)
+            if not conn:
+                result.error = "Failed to establish database connection."
+                result.error_count = 1
+                result.rows.append(ReviewResult(id=1, errlevel=2, sql=sql, errormessage=result.error, stagestatus='Execute Failed'))
+                return result
+
+            statements = sqlparse.split(sql)
+            if not statements: # Handle empty SQL string case by treating it as one (empty) statement if sqlparse returns empty
+                statements = [sql] if sql.strip() else [] # Only if sql is not just whitespace
+
+            statement_idx = 0
+            for statement_sql_original in statements:
+                statement_sql = statement_sql_original.strip()
+                if not statement_sql: # Skip empty statements resulting from splitting or original input
+                    continue
+
+                statement_idx += 1
+                review_result = ReviewResult(id=statement_idx, sql=statement_sql, affected_rows=0)
+                try:
+                    cursor = conn.cursor()
+                    # dmPython cursor.execute does not typically take parameters separately.
+                    # Parameters should be part of the SQL string or handled differently if supported.
+                    cursor.execute(statement_sql)
+
+                    # cursor.rowcount:
+                    # For DML statements (INSERT, UPDATE, DELETE), it returns the number of affected rows.
+                    # For DDL statements (CREATE, ALTER, DROP), it usually returns 0 or -1.
+                    # For SELECT statements, it's often -1 as the number of rows is determined by fetchall/fetchone.
+                    # If no exception, assume success for DDL/SELECT where rowcount is not indicative.
+                    if cursor.rowcount >= 0:
+                         review_result.affected_rows = cursor.rowcount
+                    else: # For DDL or SELECT, or if rowcount is -1 but no error
+                        review_result.affected_rows = 0 # Or some other indicator like None if preferred
+
+                    review_result.errlevel = 0
+                    review_result.stagestatus = 'Execute Successfully'
+                    review_result.errormessage = '' # Success
+                    cursor.close()
+                except Exception as e:
+                    logger.error(f"Dameng execute error on statement '{statement_sql}': {e}")
+                    review_result.errlevel = 2
+                    review_result.stagestatus = 'Execute Failed'
+                    review_result.errormessage = str(e)
+                    result.error_count += 1
+                result.rows.append(review_result)
+                # No early exit on error, execute all statements as per example structure
+
+            # Dameng typically operates in autocommit mode by default unless a transaction is explicitly started.
+            # If conn.autocommit is False (or True, explicitly set), then conn.commit() or conn.rollback() might be needed.
+            # For simplicity, assuming autocommit or session handles it.
+            # If errors occurred and transactions are being managed, conn.rollback() might be an option here.
+
+        except Exception as e:
+            logger.error(f"Dameng execute general error: {e}")
+            result.error = str(e) # Overall error message for the ReviewSet
+            # If there were specific statement errors, error_count is already > 0.
+            # If this general exception occurred before any statement, error_count might be 0.
+            if result.error_count == 0: # If no statement errors yet, but a general one happened
+                 result.error_count = 1
+
+            # Add a general error row if no specific statement rows exist or if it's a new error
+            if not result.rows:
+                 result.rows.append(ReviewResult(id=1, errlevel=2, sql=sql, errormessage=str(e), stagestatus='Execute Failed'))
+            # Optionally, update all existing rows if a global failure like connection drop occurs mid-way
+            # For now, this is handled by the statement-specific errors or the general error row above.
+        finally:
+            if conn and close_conn:
+                try:
+                    conn.close()
+                    if conn is self.conn: # If it was the shared self.conn
+                        self.conn = None
+                except Exception as e_close:
+                    logger.error(f"Error closing Dameng connection: {e_close}")
+                    if not result.error: # Don't overwrite a more specific execution error
+                        result.error = str(e_close)
+                        if result.error_count == 0: result.error_count = 1
+        return result
 
     def get_execute_percentage(self):
         logger.warning("DmEngine.get_execute_percentage is not implemented. Returning None.")
