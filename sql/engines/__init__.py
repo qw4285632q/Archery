@@ -240,6 +240,9 @@ def get_engine(instance=None):  # pragma: no cover
             from .cloud.aliyun_rds import AliyunRDS
 
             return AliyunRDS(instance=instance)
+    elif instance.db_type == 'DM':
+        from .dm import DmEngine
+        return DmEngine(instance=instance)
     engine = engine_map.get(instance.db_type)
     if not engine:
         raise ValueError(

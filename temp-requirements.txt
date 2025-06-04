@@ -1,9 +1,7 @@
 Django==4.1.13
-mysqlclient==2.*
 requests==2.31.0
 simplejson==3.17.2
 mybatis_mapper2sql==0.1.9
-django-auth-ldap==4.1.0
 python-dateutil==2.8.1
 pymongo==4.6.3
 psycopg2-binary==2.*
@@ -16,9 +14,7 @@ pyodbc==4.*
 gunicorn==22.0.0
 pyecharts==2.0.4
 aliyun-python-sdk-rds==2.1.1
-cx-Oracle==7.3.0
 supervisor==4.1.0
-phoenixdb==1.2.1
 django-mirage-field==1.4.0
 schema-sync==0.9.7
 parsedatetime==2.4
@@ -46,6 +42,3 @@ httpx
 OpenAI
 elasticsearch==8.14.0
 opensearch_py==2.6.0
-django-dmPython==3.1.7
-dmPython==2.5.5
-
