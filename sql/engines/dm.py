@@ -2,8 +2,6 @@ import dmPython # Import the Dameng Python driver
 import re # For regex checks in filter_sql
 
 from sql.engines import EngineBase
-# from common.utils.timer import Timer # Ensure this line is removed or commented
-# from django.utils.html import escape
 
 class DmEngine(EngineBase):
     """Engine for Dameng Database (DM)."""
@@ -11,19 +9,6 @@ class DmEngine(EngineBase):
     def get_connection(self, db_name=None):
         """
         Establishes and returns a connection to the Dameng database.
-        If a connection (self.conn) already exists, it's returned.
-        Otherwise, a new connection is established using instance configurations.
-
-        Args:
-            db_name (str, optional): The specific database/schema name.
-                                     Currently, this implementation does not use db_name
-                                     to switch schemas within an existing connection.
-
-        Returns:
-            dmPython.Connection: A dmPython connection object, or None if connection fails.
-
-        Raises:
-            Exception: Propagates exceptions from dmPython.connect on failure.
         """
         if self.conn:
             return self.conn
@@ -35,14 +20,12 @@ class DmEngine(EngineBase):
         port = int(host_parts[1]) if len(host_parts) > 1 else 5236
 
         try:
-            # Removed 'with Timer() as t:' block
             self.conn = dmPython.connect(
                 user=user,
                 password=password,
                 server=host,
                 port=port
             )
-            # Removed logging that used t.elapsed
         except Exception as e:
             self.conn = None
             raise e
@@ -51,44 +34,37 @@ class DmEngine(EngineBase):
     def query_check(self, db_name=None, sql=''):
         """
         Performs a basic syntax check on the SQL query.
-        Currently, it verifies if a connection can be established and a cursor created.
-
-        Args:
-            db_name (str, optional): The database/schema name.
-            sql (str): The SQL query to check.
-
-        Returns:
-            dict: A dictionary with 'status' (0 for success, 1 for failure),
-                  'msg' (message), and 'data' (empty dict).
+        Returns a dictionary with 'status', 'msg', 'data', and 'error' keys.
         """
         conn = None
-        result = {'status': 0, 'msg': 'Syntax check successful.', 'data': {}}
+        # Initialize with success state, error is None
+        result = {'status': 0, 'msg': 'Syntax check successful.', 'data': {}, 'error': None}
+        error_message = None
         try:
             conn = self.get_connection(db_name=db_name)
             if conn:
                 cursor = conn.cursor()
                 if cursor:
+                    # Basic check: if cursor can be created.
+                    # A more robust check might try to EXPLAIN the query.
                     cursor.close()
             else:
-                result['status'] = 1
-                result['msg'] = 'Syntax check failed: Could not establish connection.'
+                error_message = 'Syntax check failed: Could not establish connection.'
+
         except Exception as e:
+            error_message = f'Syntax check failed: {str(e)[:200]}' # Truncate error for UI
+
+        if error_message:
             result['status'] = 1
-            result['msg'] = f'Syntax check failed: {str(e)[:200]}'
+            result['msg'] = error_message
+            result['error'] = error_message
+
         return result
 
     def filter_sql(self, sql='', limit_num=0):
         """
         Adds a limit clause to the SQL query if limit_num is specified and
         no common limit clause seems to exist. Uses 'FETCH FIRST N ROWS ONLY' for Dameng.
-
-        Args:
-            sql (str): The SQL query string.
-            limit_num (int): The number of rows to limit to.
-
-        Returns:
-            str: The modified SQL query with a limit clause if applicable,
-                 otherwise the original SQL query.
         """
         sql_original = sql.strip()
         if sql_original.endswith(';'):
@@ -106,22 +82,7 @@ class DmEngine(EngineBase):
 
     def query(self, db_name=None, sql='', limit_num=0, close_conn=True):
         """
-        Executes a SQL query and returns the results, including column list,
-        rows, and affected row count. Manages connection lifecycle based on close_conn.
-
-        Args:
-            db_name (str, optional): The database/schema name to connect to.
-            sql (str): The SQL query to execute.
-            limit_num (int, optional): Number of rows to limit the query to. Defaults to 0 (no limit).
-            close_conn (bool, optional): Whether to close the connection after the query.
-                                         Defaults to True. If False, self.conn is kept open.
-
-        Returns:
-            dict: A dictionary containing:
-                  'column_list' (list of column names),
-                  'rows' (list of tuples representing rows),
-                  'effect_row' (int, number of affected/returned rows),
-                  'error' (str, error message if any, else None).
+        Executes a SQL query and returns the results.
         """
         result = {'column_list': [], 'rows': [], 'effect_row': 0, 'error': None}
         current_conn = None
@@ -174,32 +135,20 @@ class DmEngine(EngineBase):
     def get_all_databases(self):
         """
         Retrieves a list of all database (schema) names from the Dameng server.
-        This method uses the main query() method for execution.
-
-        Returns:
-            list: A list of database/schema names. Returns empty list on error or if no databases found.
         """
         db_names = []
         sql = "SELECT NAME FROM SYSOBJECTS WHERE TYPE$ = 'SCH';"
         try:
-            query_result = self.query(sql=sql, close_conn=False) # Keep connection for potential subsequent metadata calls
+            query_result = self.query(sql=sql, close_conn=False)
             if query_result and not query_result.get('error') and query_result.get('rows'):
                 db_names = [row[0] for row in query_result['rows'] if row and row[0]]
         except Exception as e:
-            # Error should be handled by self.query, this is a fallback.
             pass
         return db_names
 
     def get_all_tables(self, db_name):
         """
-        Retrieves a list of all table names (user and system) within a given database (schema).
-        This method uses the main query() method for execution.
-
-        Args:
-            db_name (str): The name of the database/schema.
-
-        Returns:
-            list: A list of table names. Returns empty list on error or if no tables found.
+        Retrieves a list of all table names within a given database (schema).
         """
         table_names = []
         safe_db_name = db_name.replace("'", "''")
@@ -223,14 +172,6 @@ class DmEngine(EngineBase):
     def get_all_columns_by_tb(self, db_name, tb_name, **kwargs):
         """
         Retrieves a list of all column names for a given table in a specific database (schema).
-        This method uses the main query() method for execution.
-
-        Args:
-            db_name (str): The name of the database/schema.
-            tb_name (str): The name of the table.
-
-        Returns:
-            list: A list of column names. Returns empty list on error or if no columns found.
         """
         column_names = []
         safe_db_name = db_name.replace("'", "''")
@@ -258,16 +199,6 @@ class DmEngine(EngineBase):
     def describe_table(self, db_name, tb_name, **kwargs):
         """
         Retrieves a description of a table, including column names and their data types.
-        This method uses the main query() method for execution.
-
-        Args:
-            db_name (str): The name of the database/schema.
-            tb_name (str): The name of the table.
-
-        Returns:
-            list: A list of dictionaries, where each dictionary describes a column
-                  (e.g., {'name': 'col_name', 'type': 'VARCHAR', 'comment': 'col_comment'}).
-                  Returns empty list on error or if table not found/no columns.
         """
         description = []
         safe_db_name = db_name.replace("'", "''")
@@ -285,7 +216,7 @@ class DmEngine(EngineBase):
             ORDER BY C.COLID;
         """
         try:
-            query_result = self.query(db_name=db_name, sql=sql, close_conn=False) # Keep connection for potential subsequent calls
+            query_result = self.query(db_name=db_name, sql=sql, close_conn=False)
             if query_result and not query_result.get('error') and query_result.get('rows'):
                 description = [{'name': row[0], 'type': row[1], 'comment': ''}
                                for row in query_result['rows'] if row and len(row) >= 2]
