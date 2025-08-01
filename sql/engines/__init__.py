@@ -245,6 +245,10 @@ def get_engine(instance=None):  # pragma: no cover
         from .dameng import DamengEngine
         return DamengEngine(instance=instance)
 
+    if instance.db_type == "tidb":
+        from .tidb import TidbEngine
+        return TidbEngine(instance=instance)
+
     engine = engine_map.get(instance.db_type)
     if not engine:
         raise ValueError(

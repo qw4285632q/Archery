@@ -156,7 +156,10 @@ DB_TYPE_CHOICES = (
     ("elasticsearch", "Elasticsearch"),
     ("dm", "dm"),
     ("opensearch", "OpenSearch"),
+    ("tidb", "TiDB"),
 )
+
+
 class Tunnel(models.Model):
     """
     SSH隧道配置
