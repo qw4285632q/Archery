@@ -2,6 +2,7 @@ from django.core.files.storage import FileSystemStorage
 from storages.backends.s3boto3 import S3Boto3Storage
 from storages.backends.azure_storage import AzureStorage
 from storages.backends.sftpstorage import SFTPStorage
+from botocore.client import Config as BotoConfig  # Aliased import
 from pathlib import Path
 from django.conf import settings
 import os
@@ -39,19 +40,14 @@ class DynamicStorage:
         self.sftp_port = int(self.config.get("sftp_port", 22))
         self.sftp_path = self.config["sftp_path"]
 
-        # OSS 存储相关配置信息
-        self.oss_access_key_id = self.config["oss_access_key_id"]
-        self.oss_access_key_secret = self.config["oss_access_key_secret"]
-        self.oss_endpoint = self.config["oss_endpoint"]
-        self.oss_bucket_name = self.config["oss_bucket_name"]
-        self.oss_path = self.config["oss_path"]
-
         # AWS S3 存储相关配置信息
-        self.s3_access_key = self.config["s3_access_key"]
-        self.s3_secret_key = self.config["s3_secret_key"]
-        self.s3_bucket = self.config["s3_bucket"]
-        self.s3_region = self.config["s3_region"]
-        self.s3_path = self.config["s3_path"]
+        self.s3_access_key = self.config.get("s3_access_key")
+        self.s3_secret_key = self.config.get("s3_secret_key")
+        self.s3_bucket = self.config.get("s3_bucket")
+        self.s3_region = self.config.get("s3_region")
+        self.s3_endpoint = self.config.get("s3_endpoint")
+        self.s3_path = self.config.get("s3_path")
+        self.s3_addressing_style = self.config.get("s3_addressing_style", "virtual")
 
         # Azure Blob 存储相关配置信息
         self.azure_account_name = self.config["azure_account_name"]
@@ -81,27 +77,24 @@ class DynamicStorage:
                 root_path=self.sftp_path,
             )
 
-        elif self.storage_type == "oss":
-            # 阿里云OSS 使用 S3 兼容接口，经测试，OSS的endpoint只能使用http://，否则会报aws-chunked encoding is not supported with the specified x-amz-content-sha256 value相关错误
-            return S3Boto3Storage(
-                access_key=self.oss_access_key_id,
-                secret_key=self.oss_access_key_secret,
-                bucket_name=self.oss_bucket_name,
-                location=self.oss_path,
-                endpoint_url=self.oss_endpoint,
-                file_overwrite=False,
-                addressing_style="virtual",
-            )
-
         elif self.storage_type == "s3":
-            return S3Boto3Storage(
-                access_key=self.s3_access_key,
-                secret_key=self.s3_secret_key,
-                bucket_name=self.s3_bucket,
-                region_name=self.s3_region,
-                location=self.s3_path,
-                file_overwrite=False,
-            )
+            # S3兼容存储，支持AWS S3和阿里云OSS等
+            boto_config = BotoConfig(s3={'addressing_style': self.s3_addressing_style}) # Use aliased name
+            s3_kwargs = {
+                "access_key": self.s3_access_key,
+                "secret_key": self.s3_secret_key,
+                "bucket_name": self.s3_bucket,
+                "location": self.s3_path,
+                "file_overwrite": False,
+                "config": boto_config,
+            }
+            if self.s3_endpoint:
+                # 如果配置了endpoint，则用于S3兼容存储，如OSS
+                s3_kwargs["endpoint_url"] = self.s3_endpoint
+            else:
+                # 未配置endpoint，则用于AWS S3
+                s3_kwargs["region_name"] = self.s3_region
+            return S3Boto3Storage(**s3_kwargs)
 
         elif self.storage_type == "azure":
             return AzureStorage(
@@ -149,7 +142,7 @@ class DynamicStorage:
             with self.storage as s:
                 s.listdir(".")
 
-        elif self.storage_type in ["oss", "s3"]:
+        elif self.storage_type == "s3":
             client = self.storage.connection.meta.client
             client.head_bucket(Bucket=self.storage.bucket_name)
 

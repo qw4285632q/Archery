@@ -422,15 +422,14 @@
                             <div class="form-group">
                                 <label for="storage_type" class="col-sm-4 control-label">存储类型</label>
                                 <div class="col-sm-5">
-                                    <select id="storage_type" 
+                                    <select id="storage_type"
                                             key="storage_type"
                                             class="form-control selectpicker show-tick form-control bs-select-hidden"
                                             data-live-search="true"
                                             onchange="showStorageConfig()">
                                         <option value="local">本地存储</option>
                                         <option value="sftp">SFTP</option>
-                                        <option value="oss">阿里云 OSS</option>
-                                        <option value="s3">Amazon S3</option>
+                                        <option value="s3">S3 兼容存储 (AWS S3, 阿里云 OSS, 等)</option>
                                         <option value="azure">Azure Blob</option>
                                     </select>
                                 </div>
@@ -497,99 +496,71 @@
                                         </div>
                                     </div>
                                 </div>
-                                <!-- OSS配置 -->
-                                <div id="storage-oss" class="storage-config" style="display: none;">
-                                    <div class="form-group">
-                                        <label for="oss-access-key-id" class="col-sm-4 control-label">OSS Access Key</label>
-                                        <div class="col-sm-5">
-                                        <input type="password" class="form-control" id="oss_access_key_id"
-                                               key="oss_access_key_id"
-                                               value="{{ config.oss_access_key_id }}"
-                                               placeholder="OSS Access Key">
-                                        </div>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="oss-access-key-secret" class="col-sm-4 control-label">OSS Secret Key</label>
-                                        <div class="col-sm-5">
-                                        <input type="password" class="form-control" id="oss_access_key_secret"
-                                               key="oss_access_key_secret"
-                                               value="{{ config.oss_access_key_secret }}"
-                                               placeholder="OSS Secret Key">
-                                        </div>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="oss-endpoint" class="col-sm-4 control-label">OSS Endpoint URL</label>
-                                        <div class="col-sm-5">
-                                        <input type="text" class="form-control" id="oss_endpoint"
-                                               key="oss_endpoint"
-                                               value="{{ config.oss_endpoint }}"
-                                               placeholder="http://oss-cn-hangzhou.aliyuncs.com">
-                                        </div>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="oss-bucket-name" class="col-sm-4 control-label">OSS Bucket</label>
-                                        <div class="col-sm-5">
-                                        <input type="text" class="form-control" id="oss_bucket_name"
-                                               key="oss_bucket_name"
-                                               value="{{ config.oss_bucket_name }}"
-                                               placeholder="OSS Bucket">
-                                        </div>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="oss-path" class="col-sm-4 control-label">OSS Path</label>
-                                        <div class="col-sm-5">
-                                        <input type="text" class="form-control" id="oss_path"
-                                               key="oss_path"
-                                               value="{{ config.oss_path }}"
-                                               placeholder="OSS 存储路径，开头没有 / ，如存储到tmp目录: tmp/">
-                                        </div>
-                                    </div>
-                                </div>
-                                <!-- S3配置 -->
+                                <!-- S3兼容存储配置 -->
                                 <div id="storage-s3" class="storage-config" style="display: none;">
                                     <div class="form-group">
-                                        <label for="s3-bucket" class="col-sm-4 control-label">AWS S3 Bucket</label>
+                                        <label for="s3_bucket" class="col-sm-4 control-label">Bucket名称</label>
                                         <div class="col-sm-5">
                                         <input type="text" class="form-control" id="s3_bucket"
                                                key="s3_bucket"
                                                value="{{ config.s3_bucket }}"
-                                               placeholder="S3 Bucket">
-                                        </div>  
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="s3-access-key" class="col-sm-4 control-label">AWS Access Key</label>
-                                        <div class="col-sm-5">
-                                        <input type="text" class="form-control" id="s3_access_key"
-                                               key="s3_access_key"
-                                               value="{{ config.s3_access_key }}"
-                                               placeholder="AWS Access Key">
+                                               placeholder="Bucket">
                                         </div>
                                     </div>
                                     <div class="form-group">
-                                        <label for="s3-secret-key" class="col-sm-4 control-label">AWS Secret Key</label>
+                                        <label for="s3_access_key" class="col-sm-4 control-label">Access Key</label>
+                                        <div class="col-sm-5">
+                                        <input type="password" class="form-control" id="s3_access_key"
+                                               key="s3_access_key"
+                                               value="{{ config.s3_access_key }}"
+                                               placeholder="Access Key">
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="s3_secret_key" class="col-sm-4 control-label">Secret Key</label>
                                         <div class="col-sm-5">
                                         <input type="password" class="form-control" id="s3_secret_key"
                                                key="s3_secret_key"
                                                value="{{ config.s3_secret_key }}"
-                                               placeholder="AWS Secret Key">
+                                               placeholder="Secret Key">
                                         </div>
                                     </div>
                                     <div class="form-group">
-                                        <label for="s3-region" class="col-sm-4 control-label">AWS Region</label>
+                                        <label for="s3_region" class="col-sm-4 control-label">Region</label>
                                         <div class="col-sm-5">
                                         <input type="text" class="form-control" id="s3_region"
                                                key="s3_region"
                                                value="{{ config.s3_region }}"
-                                               placeholder="AWS Region">
+                                               placeholder="AWS S3 Region (例如 us-east-1), 其他服务请留空">
+                                        </div>
+                                    </div>
+                                     <div class="form-group">
+                                        <label for="s3_endpoint" class="col-sm-4 control-label">Endpoint URL</label>
+                                        <div class="col-sm-5">
+                                        <input type="text" class="form-control" id="s3_endpoint"
+                                               key="s3_endpoint"
+                                               value="{{ config.s3_endpoint }}"
+                                               placeholder="S3兼容存储的Endpoint, 例如阿里云OSS">
                                         </div>
                                     </div>
                                     <div class="form-group">
-                                        <label for="s3-path" class="col-sm-4 control-label">S3 Path</label>
+                                        <label for="s3_addressing_style" class="col-sm-4 control-label">寻址模式</label>
+                                        <div class="col-sm-5">
+                                            <select id="s3_addressing_style"
+                                                    key="s3_addressing_style"
+                                                    class="form-control selectpicker show-tick form-control bs-select-hidden">
+                                                <option value="virtual" {% if config.s3_addressing_style == 'virtual' or not config.s3_addressing_style %}selected{% endif %}>虚拟主机模式 (e.g. bucket.endpoint)</option>
+                                                <option value="path" {% if config.s3_addressing_style == 'path' %}selected{% endif %}>路径模式 (e.g. endpoint/bucket)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="s3_path" class="col-sm-4 control-label">存储路径 (Path)</label>
                                         <div class="col-sm-5">
                                         <input type="text" class="form-control" id="s3_path"
                                                key="s3_path"
                                                value="{{ config.s3_path }}"
-                                               placeholder="AWS 存储路径，开头没有 / ，如存储到tmp目录: tmp/">
+                                               placeholder="存储路径，开头没有 / ，如存储到tmp目录: tmp/">
                                         </div>
                                     </div>
                                 </div>
@@ -1865,32 +1836,36 @@
             $(this).addClass('disabled');
             $(this).prop('disabled', true);
             var SqlfileStorageType = $("#storage_type").val();
+            var formData = {
+                storage_type: $("#storage_type").val()
+            };
+
             if (SqlfileStorageType === 'sftp') {
-                var formData = {
-                    max_export_rows: $("#max_export_rows").val(),
-                    storage_type: $("#storage_type").val(),
+                Object.assign(formData, {
                     sftp_host: $("#sftp_host").val(),
                     sftp_user: $("#sftp_user").val(),
                     sftp_password: $("#sftp_password").val(),
                     sftp_port: $("#sftp_port").val(),
                     sftp_path: $("#sftp_path").val(),
-                }
-            } else if (SqlfileStorageType === 'oss') {
-                var formData = {
-                    max_export_rows: $("#max_export_rows").val(),
-                    storage_type: $("#storage_type").val(),
-                    access_key_id: $("#oss_access_key_id").val(),
-                    access_key_secret: $("#oss_access_key_secret").val(),
-                    endpoint: $("#oss_endpoint").val(),
-                    bucket_name: $("#oss_bucket_name").val(),
-                    oss_path: $("#oss_path").val(),
-                }
-            } else if (SqlfileStorageType === 'local') {
-                var formData = {
-                    max_export_rows: $("#max_export_rows").val(),
-                    storage_type: $("#storage_type").val(),
-                }
+                });
+            } else if (SqlfileStorageType === 's3') {
+                Object.assign(formData, {
+                    s3_access_key: $("#s3_access_key").val(),
+                    s3_secret_key: $("#s3_secret_key").val(),
+                    s3_bucket: $("#s3_bucket").val(),
+                    s3_region: $("#s3_region").val(),
+                    s3_endpoint: $("#s3_endpoint").val(),
+                    s3_path: $("#s3_path").val(),
+                });
+            } else if (SqlfileStorageType === 'azure') {
+                 Object.assign(formData, {
+                    azure_account_name: $("#azure_account_name").val(),
+                    azure_account_key: $("#azure_account_key").val(),
+                    azure_container: $("#azure_container").val(),
+                    azure_path: $("#azure_path").val(),
+                });
             }
+
             $.ajax({
                 type: "post",
                 url: "/check/file_storage_connect/",
