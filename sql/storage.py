@@ -2,7 +2,6 @@ from django.core.files.storage import FileSystemStorage
 from storages.backends.s3boto3 import S3Boto3Storage
 from storages.backends.azure_storage import AzureStorage
 from storages.backends.sftpstorage import SFTPStorage
-from botocore.client import Config as BotoConfig  # Aliased import
 from pathlib import Path
 from django.conf import settings
 import os
@@ -16,6 +15,17 @@ def get_sys_config():
     for items in all_config:
         sys_config[items["item"]] = items["value"]
     return sys_config
+
+
+class CustomS3Boto3Storage(S3Boto3Storage):
+    """
+    自定义S3存储类，以强制注入特定的boto3配置，特别是寻址模式。
+    """
+    def _get_config(self):
+        config = super()._get_config()
+        # 强制将实例上设置的addressing_style应用到boto3配置中
+        config.s3['addressing_style'] = self.addressing_style
+        return config
 
 
 class DynamicStorage:
@@ -79,14 +89,13 @@ class DynamicStorage:
 
         elif self.storage_type == "s3":
             # S3兼容存储，支持AWS S3和阿里云OSS等
-            boto_config = BotoConfig(s3={'addressing_style': self.s3_addressing_style}) # Use aliased name
             s3_kwargs = {
                 "access_key": self.s3_access_key,
                 "secret_key": self.s3_secret_key,
                 "bucket_name": self.s3_bucket,
                 "location": self.s3_path,
                 "file_overwrite": False,
-                "config": boto_config,
+                "addressing_style": self.s3_addressing_style,
             }
             if self.s3_endpoint:
                 # 如果配置了endpoint，则用于S3兼容存储，如OSS
@@ -94,7 +103,7 @@ class DynamicStorage:
             else:
                 # 未配置endpoint，则用于AWS S3
                 s3_kwargs["region_name"] = self.s3_region
-            return S3Boto3Storage(**s3_kwargs)
+            return CustomS3Boto3Storage(**s3_kwargs)
 
         elif self.storage_type == "azure":
             return AzureStorage(
