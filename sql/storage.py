@@ -24,7 +24,10 @@ class CustomS3Boto3Storage(S3Boto3Storage):
     def _get_config(self):
         config = super()._get_config()
         # 强制将实例上设置的addressing_style应用到boto3配置中
-        config.s3['addressing_style'] = self.addressing_style
+        config.s3["addressing_style"] = self.addressing_style
+        # 如果是第三方S3或Minio，可能需要禁用SSL证书验证
+        if self.endpoint_url:
+            config.s3["verify"] = self.custom_domain is None or self.secure_urls
         return config
 
 
