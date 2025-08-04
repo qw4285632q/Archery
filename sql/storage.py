@@ -172,7 +172,7 @@ class DynamicStorage:
             with self.storage as s:
                 s.listdir(".")
 
-        elif self.storage_type == "s3":
+        elif self.storage_type == "s3" or self.storage_type == "minio":
             client = self.storage.connection.meta.client
             client.head_bucket(Bucket=self.storage.bucket_name)
 

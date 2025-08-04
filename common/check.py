@@ -169,6 +169,12 @@ def file_storage_connect(request):
         "azure_account_key": request.POST.get("azure_account_key", ""),
         "azure_container": request.POST.get("azure_container", ""),
         "azure_path": request.POST.get("azure_path", ""),
+        "minio_access_key": request.POST.get("minio_access_key", ""),
+        "minio_secret_key": request.POST.get("minio_secret_key", ""),
+        "minio_bucket": request.POST.get("minio_bucket", ""),
+        "minio_endpoint": request.POST.get("minio_endpoint", ""),
+        "minio_path": request.POST.get("minio_path", ""),
+        "minio_addressing_style": request.POST.get("minio_addressing_style", "auto"),
     }
 
     try:

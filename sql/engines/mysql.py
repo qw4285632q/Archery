@@ -79,29 +79,25 @@ class MysqlEngine(EngineBase):
         if self.conn:
             self.thread_id = self.conn.thread_id()
             return self.conn
+
+        kwargs = {
+            "host": self.host,
+            "port": self.port,
+            "user": self.user,
+            "passwd": self.password,
+            "charset": self.instance.charset or "utf8mb4",
+            "conv": conversions,
+            "connect_timeout": 10,
+        }
         if db_name:
-            self.conn = MySQLdb.connect(
-                host=self.host,
-                port=self.port,
-                user=self.user,
-                passwd=self.password,
-                db=db_name,
-                charset=self.instance.charset or "utf8mb4",
-                conv=conversions,
-                connect_timeout=10,
-                read_default_file=getattr(self.instance, 'cnf_path', None)
-            )
-        else:
-            self.conn = MySQLdb.connect(
-                host=self.host,
-                port=self.port,
-                user=self.user,
-                passwd=self.password,
-                charset=self.instance.charset or "utf8mb4",
-                conv=conversions,
-                connect_timeout=10,
-                read_default_file=getattr(self.instance, 'cnf_path', None)
-            )
+            kwargs["db"] = db_name
+
+        cnf_path = getattr(self.instance, "cnf_path", None)
+        if cnf_path:
+            kwargs["read_default_file"] = cnf_path
+
+        self.conn = MySQLdb.connect(**kwargs)
+
         if read_only:
             self.conn.autocommit(False)
             self.conn.query("SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
