@@ -72,36 +72,34 @@ class MysqlEngine(EngineBase):
         self.config = SysConfig()
         self.inc_engine = GoInceptionEngine()
 
-    def get_connection(self, db_name=None, read_only=False):
+    def get_connection(self, db_name=None):
         # https://stackoverflow.com/questions/19256155/python-mysqldb-returning-x01-for-bit-values
         conversions = MySQLdb.converters.conversions
         conversions[FIELD_TYPE.BIT] = lambda data: data == b"\x01"
         if self.conn:
             self.thread_id = self.conn.thread_id()
             return self.conn
-
-        kwargs = {
-            "host": self.host,
-            "port": self.port,
-            "user": self.user,
-            "passwd": self.password,
-            "charset": self.instance.charset or "utf8mb4",
-            "conv": conversions,
-            "connect_timeout": 10,
-        }
         if db_name:
-            kwargs["db"] = db_name
-
-        cnf_path = getattr(self.instance, "cnf_path", None)
-        if cnf_path:
-            kwargs["read_default_file"] = cnf_path
-
-        self.conn = MySQLdb.connect(**kwargs)
-
-        if read_only:
-            self.conn.autocommit(False)
-            self.conn.query("SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
-            self.conn.query("START TRANSACTION READ ONLY;")
+            self.conn = MySQLdb.connect(
+                host=self.host,
+                port=self.port,
+                user=self.user,
+                passwd=self.password,
+                db=db_name,
+                charset=self.instance.charset or "utf8mb4",
+                conv=conversions,
+                connect_timeout=10,
+            )
+        else:
+            self.conn = MySQLdb.connect(
+                host=self.host,
+                port=self.port,
+                user=self.user,
+                passwd=self.password,
+                charset=self.instance.charset or "utf8mb4",
+                conv=conversions,
+                connect_timeout=10,
+            )
         self.thread_id = self.conn.thread_id()
         return self.conn
 
@@ -518,16 +516,13 @@ class MysqlEngine(EngineBase):
         max_execution_time = kwargs.get("max_execution_time", 0)
         cursorclass = kwargs.get("cursorclass") or MySQLdb.cursors.Cursor
         try:
-            # SQL_AUTO_IS_NULL=0,
-            read_only = False
-            if re.match(r"^select", sql, re.I):
-                read_only = True
-
-            conn = self.get_connection(db_name=db_name, read_only=read_only)
+            conn = self.get_connection(db_name=db_name)
+            conn.autocommit(True)
             cursor = conn.cursor(cursorclass)
-            # 设置max_execution_time
-            if max_execution_time:
+            try:
                 cursor.execute(f"set session max_execution_time={max_execution_time};")
+            except MySQLdb.OperationalError:
+                pass
             effect_row = cursor.execute(sql, parameters)
             if int(limit_num) > 0:
                 rows = cursor.fetchmany(size=int(limit_num))
@@ -694,24 +689,23 @@ class MysqlEngine(EngineBase):
         # 判断实例是否只读
         read_only = self.query(sql="SELECT @@global.read_only;").rows[0][0]
         if read_only in (1, "ON"):
-            # read_only的实例，只允许执行查询语句
-            sql = workflow.sqlworkflowcontent.sql_content
-            sql = sql.strip().lower()
-            if not sql.startswith("select"):
-                result = ReviewSet(
-                    full_sql=workflow.sqlworkflowcontent.sql_content,
-                    rows=[
-                        ReviewResult(
-                            id=1,
-                            errlevel=2,
-                            stagestatus="Execute Failed",
-                            errormessage="实例read_only=1，禁止执行变更语句!",
-                            sql=workflow.sqlworkflowcontent.sql_content,
-                        )
-                    ],
-                )
-                result.error = ("实例read_only=1，禁止执行变更语句!",)
-                return result
+            result = ReviewSet(
+                full_sql=workflow.sqlworkflowcontent.sql_content,
+                rows=[
+                    ReviewResult(
+                        id=1,
+                        errlevel=2,
+                        stagestatus="Execute Failed",
+                        errormessage="实例read_only=1，禁止执行变更语句!",
+                        sql=workflow.sqlworkflowcontent.sql_content,
+                    )
+                ],
+            )
+            result.error = ("实例read_only=1，禁止执行变更语句!",)
+            return result
+        # TODO 原生执行
+        # if workflow.is_manual == 1:
+        #     return self.execute(db_name=workflow.db_name, sql=workflow.sqlworkflowcontent.sql_content)
         # inception执行
         return self.inc_engine.execute(workflow)
 
