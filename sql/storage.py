@@ -59,6 +59,14 @@ class DynamicStorage:
         self.s3_path = self.config.get("s3_path")
         self.s3_addressing_style = self.config.get("s3_addressing_style", "virtual")
 
+        # MinIO 存储相关配置信息
+        self.minio_access_key = self.config.get("minio_access_key")
+        self.minio_secret_key = self.config.get("minio_secret_key")
+        self.minio_bucket = self.config.get("minio_bucket")
+        self.minio_endpoint = self.config.get("minio_endpoint")
+        self.minio_path = self.config.get("minio_path")
+        self.minio_addressing_style = self.config.get("minio_addressing_style", "auto")
+
         # Azure Blob 存储相关配置信息
         self.azure_account_name = self.config["azure_account_name"]
         self.azure_account_key = self.config["azure_account_key"]
@@ -104,6 +112,19 @@ class DynamicStorage:
                 # 未配置endpoint，则用于AWS S3
                 s3_kwargs["region_name"] = self.s3_region
             return CustomS3Boto3Storage(**s3_kwargs)
+
+        elif self.storage_type == "minio":
+            # MinIO 存储
+            minio_kwargs = {
+                "access_key": self.config.get("minio_access_key"),
+                "secret_key": self.config.get("minio_secret_key"),
+                "bucket_name": self.config.get("minio_bucket"),
+                "endpoint_url": self.config.get("minio_endpoint"),
+                "location": self.config.get("minio_path"),
+                "file_overwrite": False,
+                "addressing_style": self.config.get("minio_addressing_style", "auto"),
+            }
+            return CustomS3Boto3Storage(**minio_kwargs)
 
         elif self.storage_type == "azure":
             return AzureStorage(

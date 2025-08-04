@@ -89,7 +89,7 @@ class MysqlEngine(EngineBase):
                 charset=self.instance.charset or "utf8mb4",
                 conv=conversions,
                 connect_timeout=10,
-                read_default_file=self.instance.cnf_path if self.instance.cnf_path else None
+                read_default_file=getattr(self.instance, 'cnf_path', None)
             )
         else:
             self.conn = MySQLdb.connect(
@@ -100,7 +100,7 @@ class MysqlEngine(EngineBase):
                 charset=self.instance.charset or "utf8mb4",
                 conv=conversions,
                 connect_timeout=10,
-                read_default_file=self.instance.cnf_path if self.instance.cnf_path else None
+                read_default_file=getattr(self.instance, 'cnf_path', None)
             )
         if read_only:
             self.conn.autocommit(False)

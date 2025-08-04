@@ -432,7 +432,7 @@ def offline_file_download(request):
                         {"error": f"文件下载失败：请联系管理员。"}, status=500
                     )
 
-            elif storage_type in ["oss", "s3"]:
+            elif storage_type in ["oss", "s3", "minio"]:
                 try:
                     # 云对象存储生成带有效期的临时下载URL
                     presigned_url = storage.url(file_name)
