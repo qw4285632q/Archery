@@ -19,6 +19,7 @@ from .models import ResultSet, ReviewSet, ReviewResult
 from sql.utils.data_masking import brute_mask
 from common.config import SysConfig
 from sql.models import SqlBackupHistory
+from common.utils.extend_json_encoder import ExtendJSONEncoder
 import json
 
 logger = logging.getLogger("default")
@@ -53,7 +54,7 @@ class DamengEngine(EngineBase):
 
     @property
     def auto_backup(self):
-        return False
+        return True
 
     def get_all_databases(self):
         sql = "SELECT USERNAME FROM ALL_USERS WHERE USERNAME NOT IN ('SYS','SYSTEM','SYSDBA','SYSAUDITOR', 'CTLSYS', 'SQLGUARD', 'STREAMAGO', 'REPLSYS', 'SECURITY', 'DSVIEW', 'DBAUDIT', 'ETLTOOL', 'DMHR') ORDER BY USERNAME"
@@ -228,8 +229,30 @@ class DamengEngine(EngineBase):
                             # Use EXPLAIN FOR to validate syntax and object existence without execution
                             explain_sql = f"EXPLAIN FOR {s}"
                             cursor = conn.cursor()
+                            # 设置模式
+                            if db_name:
+                                try:
+                                    set_schema_sql = f'SET SCHEMA \"{db_name.upper()}\"'
+                                    cursor.execute(set_schema_sql)
+                                except Exception as e:
+                                    logger.warning(f"Failed to set schema for backup, error: {e}")
                             cursor.execute(explain_sql)
-                            cursor.fetchall()  # Consume results to ensure check is complete
+                            explain_result = cursor.fetchall()  # Consume results to ensure check is complete
+
+                            # Try to extract the estimated affected rows
+                            if explain_result:
+                                col_names = [desc[0] for desc in cursor.description]
+                                try:
+                                    op_index = col_names.index('OPERATION')
+                                    rows_index = col_names.index('ROW_NUMS')
+                                    # Find the first plan step that is not the DML statement itself
+                                    for row in explain_result:
+                                        if row[op_index] not in ('UPDATE', 'DELETE', 'INSERT'):
+                                            review_result.affected_rows = int(row[rows_index])
+                                            break
+                                except (ValueError, IndexError) as e:
+                                    logger.warning(f"Could not parse EXPLAIN output for row count: {e}")
+
                         except Exception as e:
                             logger.warning(f"Dameng syntax check failed for statement: {s}\nError: {traceback.format_exc()}")
                             review_result.errlevel = 2
@@ -287,6 +310,12 @@ class DamengEngine(EngineBase):
                 try:
                     logger.info(f"Workflow ID {workflow.id}: Backup option is enabled. Starting backup process.")
                     backup_cursor = conn.cursor()
+                    if db_name:
+                        try:
+                            set_schema_sql = f'SET SCHEMA \"{db_name.upper()}\"'
+                            backup_cursor.execute(set_schema_sql)
+                        except Exception as e:
+                            logger.warning(f"Failed to set schema for backup, error: {e}")
                     for stmt in statements:
                         s = stmt.strip()
                         if not s:
@@ -326,6 +355,9 @@ class DamengEngine(EngineBase):
                                 if rows:
                                     columns = [desc[0] for desc in backup_cursor.description]
                                     backup_data = [dict(zip(columns, row)) for row in rows]
+
+                                    # 使用ExtendJSONEncoder处理datetime
+                                    backup_data = json.loads(json.dumps(backup_data, cls=ExtendJSONEncoder))
 
                                     # Save to backup history
                                     SqlBackupHistory.objects.create(
@@ -441,12 +473,26 @@ class DamengEngine(EngineBase):
                 self.close()
 
         return execute_result_set
+    def _format_sql_value(self, value):
+        """
+        Formats a Python value for use in a SQL query.
+        - None is converted to NULL.
+        - Strings are quoted and single quotes are escaped.
+        - Other types are converted to strings.
+        """
+        if value is None:
+            return "NULL"
+        elif isinstance(value, str):
+            # Escape single quotes for SQL by replacing them with two single quotes
+            return "'" + value.replace("'", "''") + "'"
+        else:
+            return str(value)
 
     def get_rollback(self, workflow):
         """
         获取回滚语句
         """
-        # NOTE: This method constructs rollback SQL strings manually and might not handle all data types correctly (e.g., dates, binary data).
+        # NOTE: This method constructs rollback SQL strings manually.
         # It assumes that primary keys are not updated.
         # 获取备份历史
         backup_history = SqlBackupHistory.objects.filter(workflow=workflow)
@@ -459,23 +505,46 @@ class DamengEngine(EngineBase):
             parsed = sqlparse.parse(original_sql)[0]
             stmt_type = parsed.get_type()
             table_name = history.table_name
-            backup_data = json.loads(history.backup_data)
+            try:
+                # json.loads may fail
+                backup_data = history.backup_data
+            except Exception:
+                # if backup_data is not valid json, we can't generate rollback sql
+                # just skip this history
+                logger.warning(f"Failed to parse backup_data for workflow {workflow.id}, history {history.id}. Skipping.")
+                continue
 
             if stmt_type == 'DELETE':
                 for row in backup_data:
                     columns = ", ".join(row.keys())
-                    values = ", ".join([f"'{v}'" if isinstance(v, str) else str(v) for v in row.values()])
+                    values = ", ".join([self._format_sql_value(v) for v in row.values()])
                     rollback_sql = f"INSERT INTO {table_name} ({columns}) VALUES ({values});"
                     rollback_sql_list.append([original_sql, rollback_sql])
+
             elif stmt_type == 'UPDATE':
                 # 获取主键
                 primary_key = self._get_primary_key(workflow.db_name, table_name)
-                if not primary_key:
-                    raise Exception(f"无法找到表 {table_name} 的主键，无法生成UPDATE回滚语句。")
 
                 for row in backup_data:
-                    set_clause = ", ".join([f"{k}='{v}'" if isinstance(v, str) else f"{k}={v}" for k, v in row.items() if k != primary_key])
-                    where_clause = f"{primary_key} = '{row[primary_key]}'" if isinstance(row[primary_key], str) else f"{primary_key} = {row[primary_key]}"
+                    if primary_key:
+                        # 使用主键构建回滚语句
+                        set_clause = ", ".join(
+                            [f"{k}={self._format_sql_value(v)}" for k, v in row.items() if k != primary_key])
+                        where_clause = f"{primary_key} = {self._format_sql_value(row.get(primary_key))}"
+                        if not set_clause:
+                            # Skip if table only has a primary key, nothing to update
+                            continue
+                    else:
+                        # 没有主键，使用所有列构建回滚语句
+                        set_clause = ", ".join([f"{k}={self._format_sql_value(v)}" for k, v in row.items()])
+                        where_clause_parts = []
+                        for k, v in row.items():
+                            if v is None:
+                                where_clause_parts.append(f"{k} IS NULL")
+                            else:
+                                where_clause_parts.append(f"{k} = {self._format_sql_value(v)}")
+                        where_clause = " AND ".join(where_clause_parts)
+
                     rollback_sql = f"UPDATE {table_name} SET {set_clause} WHERE {where_clause};"
                     rollback_sql_list.append([original_sql, rollback_sql])
         return rollback_sql_list

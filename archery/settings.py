@@ -8,6 +8,8 @@ from datetime import timedelta
 import environ
 import requests
 import logging
+from django.core.cache import cache
+
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
