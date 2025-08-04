@@ -27,7 +27,10 @@ class CustomS3Boto3Storage(S3Boto3Storage):
         config.s3["addressing_style"] = self.addressing_style
         # 如果是第三方S3或Minio，可能需要禁用SSL证书验证
         if self.endpoint_url:
-            config.s3["verify"] = self.custom_domain is None or self.secure_urls
+            config.s3["verify"] = False
+            config.s3["use_dualstack_endpoint"] = False
+            if self.addressing_style == "path":
+                config.s3["virtual_hosting"] = False
         return config
 
 
