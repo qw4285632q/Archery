@@ -185,6 +185,13 @@ class TidbEngine(MysqlEngine):
 
                     rollback_sql = f"UPDATE `{table_name}` SET {set_clause} WHERE {where_clause};"
                     rollback_sql_list.append([original_sql, rollback_sql])
+            elif stmt_type == 'ALTER':
+                # 简单的从ALTER语句中提取列名
+                column_match = re.search(r"ADD\s+COLUMN\s+`?([^`\s]+)`?", original_sql, re.IGNORECASE)
+                if column_match:
+                    column_name = column_match.group(1)
+                    rollback_sql = f"ALTER TABLE `{table_name}` DROP COLUMN `{column_name}`;"
+                    rollback_sql_list.append([original_sql, rollback_sql])
         return rollback_sql_list
 
     def _get_primary_key(self, db_name, tb_name):
