@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import traceback
+import sqlparse
 
 from sql.models import SqlBackupHistory
 from .mysql import MysqlEngine
