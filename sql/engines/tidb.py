@@ -63,7 +63,10 @@ class TidbEngine(MysqlEngine):
             raise Exception("Failed to parse table name from SQL")
 
         # 构建备份查询
-        backup_sql = f"SELECT * FROM `{db_name}`.`{table_name}`"
+        if '.' in table_name:
+            backup_sql = f"SELECT * FROM `{table_name}`"
+        else:
+            backup_sql = f"SELECT * FROM `{db_name}`.`{table_name}`"
         if where_clause:
             backup_sql += f" WHERE {where_clause}"
 
