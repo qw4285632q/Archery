@@ -17,6 +17,10 @@ class TidbEngine(MysqlEngine):
     name = "TiDB"
     info = "TiDB engine"
 
+    @property
+    def auto_backup(self):
+        return True
+
     def __init__(self, instance=None):
         super().__init__(instance=instance)
 

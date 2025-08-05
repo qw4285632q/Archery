@@ -37,6 +37,10 @@ client charset = UTF-8;connect timeout=10;CHARSET={4};TrustServerCertificate=yes
 
     info = "MsSQL engine"
 
+    @property
+    def auto_backup(self):
+        return True
+
     def get_all_databases(self):
         """获取数据库列表, 返回一个ResultSet"""
         sql = "SELECT name FROM master.sys.databases order by name"
