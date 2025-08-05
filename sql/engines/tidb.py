@@ -206,6 +206,25 @@ class TidbEngine(MysqlEngine):
                     column_name = column_match.group(1)
                     rollback_sql = f"ALTER TABLE `{table_name}` DROP COLUMN `{column_name}`;"
                     rollback_sql_list.append([original_sql, rollback_sql])
+            elif stmt_type == 'INSERT':
+                # 获取主键
+                primary_key = self._get_primary_key(workflow.db_name, table_name)
+                if primary_key:
+                    # 从INSERT语句中提取主键的值
+                    values_match = re.search(r"VALUES\s*\((.*)\)", original_sql, re.IGNORECASE)
+                    if values_match:
+                        values = [v.strip() for v in values_match.group(1).split(',')]
+                        #  获取主键的位置
+                        columns_match = re.search(r"\((.*)\)", original_sql, re.IGNORECASE)
+                        if columns_match:
+                            columns = [c.strip().strip('`') for c in columns_match.group(1).split(',')]
+                            try:
+                                pk_index = columns.index(primary_key)
+                                pk_value = values[pk_index]
+                                rollback_sql = f"DELETE FROM `{table_name}` WHERE `{primary_key}` = {pk_value};"
+                                rollback_sql_list.append([original_sql, rollback_sql])
+                            except ValueError:
+                                pass
         return rollback_sql_list
 
     def _get_primary_key(self, db_name, tb_name):
