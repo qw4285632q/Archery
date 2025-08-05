@@ -116,3 +116,89 @@ class TidbEngine(MysqlEngine):
             return table_name.strip('`'), where_clause
 
         return None, None
+
+    def get_rollback(self, workflow):
+        """
+        获取回滚语句
+        """
+        # NOTE: This method constructs rollback SQL strings manually.
+        # It assumes that primary keys are not updated.
+        # 获取备份历史
+        backup_history = SqlBackupHistory.objects.filter(workflow=workflow)
+        if not backup_history:
+            return []
+
+        rollback_sql_list = []
+        for history in backup_history:
+            original_sql = history.sql_statement
+            parsed = sqlparse.parse(original_sql)[0]
+            stmt_type = parsed.get_type()
+            table_name = history.table_name
+            try:
+                # json.loads may fail
+                backup_data = json.loads(history.backup_data)
+            except Exception:
+                # if backup_data is not valid json, we can't generate rollback sql
+                # just skip this history
+                logger.warning(f"Failed to parse backup_data for workflow {workflow.id}, history {history.id}. Skipping.")
+                continue
+
+            if stmt_type == 'DELETE':
+                for row in backup_data:
+                    columns = ", ".join(row.keys())
+                    values = ", ".join([self._format_sql_value(v) for v in row.values()])
+                    rollback_sql = f"INSERT INTO `{table_name}` ({columns}) VALUES ({values});"
+                    rollback_sql_list.append([original_sql, rollback_sql])
+
+            elif stmt_type == 'UPDATE':
+                # 获取主键
+                primary_key = self._get_primary_key(workflow.db_name, table_name)
+
+                for row in backup_data:
+                    if primary_key:
+                        # 使用主键构建回滚语句
+                        set_clause = ", ".join(
+                            [f"`{k}`={self._format_sql_value(v)}" for k, v in row.items() if k != primary_key])
+                        where_clause = f"`{primary_key}` = {self._format_sql_value(row.get(primary_key))}"
+                        if not set_clause:
+                            # Skip if table only has a primary key, nothing to update
+                            continue
+                    else:
+                        # 没有主键，使用所有列构建回滚语句
+                        set_clause = ", ".join([f"`{k}`={self._format_sql_value(v)}" for k, v in row.items()])
+                        where_clause_parts = []
+                        for k, v in row.items():
+                            if v is None:
+                                where_clause_parts.append(f"`{k}` IS NULL")
+                            else:
+                                where_clause_parts.append(f"`{k}` = {self._format_sql_value(v)}")
+                        where_clause = " AND ".join(where_clause_parts)
+
+                    rollback_sql = f"UPDATE `{table_name}` SET {set_clause} WHERE {where_clause};"
+                    rollback_sql_list.append([original_sql, rollback_sql])
+        return rollback_sql_list
+
+    def _get_primary_key(self, db_name, tb_name):
+        """
+        获取表的主键
+        """
+        sql = f"SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = '{db_name}' AND TABLE_NAME = '{tb_name}' AND CONSTRAINT_NAME = 'PRIMARY';"
+        result = self.query(db_name=db_name, sql=sql)
+        if result.rows:
+            return result.rows[0][0]
+        return None
+
+    def _format_sql_value(self, value):
+        """
+        Formats a Python value for use in a SQL query.
+        - None is converted to NULL.
+        - Strings are quoted and single quotes are escaped.
+        - Other types are converted to strings.
+        """
+        if value is None:
+            return "NULL"
+        elif isinstance(value, str):
+            # Escape single quotes for SQL by replacing them with two single quotes
+            return "'" + value.replace("'", "''") + "'"
+        else:
+            return str(value)
