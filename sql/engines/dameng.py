@@ -324,7 +324,7 @@ class DamengEngine(EngineBase):
                         parsed = sqlparse.parse(s)[0]
                         stmt_type = parsed.get_type()
 
-                        if stmt_type in ('UPDATE', 'DELETE'):
+                        if stmt_type in ('UPDATE', 'DELETE', 'INSERT'):
                             table_name = None
                             where_clause = ""
 

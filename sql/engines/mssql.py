@@ -401,7 +401,11 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         return check_result
 
     def execute_workflow(self, workflow):
-        if workflow.is_backup:
+        sql_content = workflow.sqlworkflowcontent.sql_content.strip()
+        parsed = sqlparse.parse(sql_content)[0]
+        stmt_type = parsed.get_type()
+
+        if workflow.is_backup and stmt_type in ('DELETE', 'UPDATE', 'INSERT'):
             # 备份数据
             try:
                 self._backup(workflow)

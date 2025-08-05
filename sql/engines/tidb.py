@@ -24,29 +24,31 @@ class TidbEngine(MysqlEngine):
         """
         TiDB的备份流程
         """
-        if not workflow.is_backup:
-            return super().execute_workflow(workflow)
+        sql_content = workflow.sqlworkflowcontent.sql_content.strip()
+        parsed = sqlparse.parse(sql_content)[0]
+        stmt_type = parsed.get_type()
 
-        # 备份数据
-        try:
-            self.backup(workflow)
-        except Exception as e:
-            logger.error(f"TiDB backup failed: {e}\n{traceback.format_exc()}")
-            # 备份失败，直接返回错误，不继续执行
-            result = ReviewSet(
-                full_sql=workflow.sqlworkflowcontent.sql_content,
-                rows=[
-                    ReviewResult(
-                        id=1,
-                        errlevel=2,
-                        stagestatus="Execute Failed",
-                        errormessage=f"Backup failed: {e}",
-                        sql=workflow.sqlworkflowcontent.sql_content,
-                    )
-                ],
-            )
-            result.error = f"Backup failed: {e}"
-            return result
+        if workflow.is_backup and stmt_type in ('DELETE', 'UPDATE', 'INSERT'):
+            # 备份数据
+            try:
+                self.backup(workflow)
+            except Exception as e:
+                logger.error(f"TiDB backup failed: {e}\n{traceback.format_exc()}")
+                # 备份失败，直接返回错误，不继续执行
+                result = ReviewSet(
+                    full_sql=workflow.sqlworkflowcontent.sql_content,
+                    rows=[
+                        ReviewResult(
+                            id=1,
+                            errlevel=2,
+                            stagestatus="Execute Failed",
+                            errormessage=f"Backup failed: {e}",
+                            sql=workflow.sqlworkflowcontent.sql_content,
+                        )
+                    ],
+                )
+                result.error = f"Backup failed: {e}"
+                return result
 
         # 执行SQL
         # 备份成功后，设置is_backup为False，防止父类再次备份
