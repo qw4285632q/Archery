@@ -488,6 +488,12 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             where_clause = delete_match.group(2) or ''
             return table_name, where_clause
 
+        # 匹配INSERT
+        insert_match = re.match(r"INSERT\s+INTO\s+\[?([^\]]+)\]?", sql, re.IGNORECASE | re.DOTALL)
+        if insert_match:
+            table_name = insert_match.group(1).strip()
+            return table_name, None
+
         return None, None
 
     def get_rollback(self, workflow):
