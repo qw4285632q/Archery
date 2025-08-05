@@ -116,6 +116,14 @@ class TidbEngine(MysqlEngine):
             where_clause = delete_match.group(2) or ''
             return table_name.strip('`'), where_clause
 
+        # 匹配ALTER
+        alter_match = re.match(r"ALTER\s+TABLE\s+`?([^`]+)`?", sql, re.IGNORECASE | re.DOTALL)
+        if alter_match:
+            table_name = alter_match.group(1).strip()
+            if '.' in table_name:
+                table_name = table_name.split('.')[1]
+            return table_name.strip('`'), None
+
         return None, None
 
     def get_rollback(self, workflow):
