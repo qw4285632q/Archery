@@ -91,21 +91,21 @@ class TidbEngine(MysqlEngine):
         """简单的SQL解析，用于提取表名和where条件, 只支持简单的UPDATE/DELETE语句"""
         # 移除注释
         sql = re.sub(r"--.*", "", sql)
-        sql = re.sub(r"/\*.*\*/", "", sql)
+        sql = re.sub(r"/\*.*\*/", "", sql, flags=re.DOTALL)
         sql = sql.strip()
 
         # 匹配UPDATE
-        update_match = re.match(r"UPDATE\s+`?(\w+)`?\s+SET.*WHERE\s+(.*)", sql, re.IGNORECASE)
+        update_match = re.match(r"UPDATE\s+`?([^`]+)`?\s+SET.*?(?:\s+WHERE\s+(.*))?$", sql, re.IGNORECASE | re.DOTALL)
         if update_match:
             table_name = update_match.group(1)
-            where_clause = update_match.group(2)
+            where_clause = update_match.group(2) or ''
             return table_name, where_clause
 
         # 匹配DELETE
-        delete_match = re.match(r"DELETE\s+FROM\s+`?(\w+)`?\s+WHERE\s+(.*)", sql, re.IGNORECASE)
+        delete_match = re.match(r"DELETE\s+FROM\s+`?([^`]+)`?\s*(?:\s+WHERE\s+(.*))?$", sql, re.IGNORECASE | re.DOTALL)
         if delete_match:
             table_name = delete_match.group(1)
-            where_clause = delete_match.group(2)
+            where_clause = delete_match.group(2) or ''
             return table_name, where_clause
 
         return None, None
