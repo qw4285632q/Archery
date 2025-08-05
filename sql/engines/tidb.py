@@ -48,6 +48,8 @@ class TidbEngine(MysqlEngine):
             return result
 
         # 执行SQL
+        # 备份成功后，设置is_backup为False，防止父类再次备份
+        workflow.is_backup = False
         return super().execute_workflow(workflow)
 
     def backup(self, workflow):
