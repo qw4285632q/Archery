@@ -556,9 +556,9 @@ class DamengEngine(EngineBase):
                     if values_match:
                         values = [v.strip() for v in values_match.group(1).split(',')]
                         #  获取主键的位置
-                        columns_match = re.search(r"\((.*)\)", original_sql, re.IGNORECASE)
+                        columns_match = re.search(r"\((.*?)\)", original_sql, re.IGNORECASE)
                         if columns_match:
-                            columns = [c.strip().strip('`') for c in columns_match.group(1).split(',')]
+                            columns = [c.strip().strip('"') for c in columns_match.group(1).split(',')]
                             try:
                                 pk_index = columns.index(primary_key)
                                 pk_value = values[pk_index]
