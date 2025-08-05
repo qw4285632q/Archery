@@ -489,7 +489,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             return table_name, where_clause
 
         # 匹配INSERT
-        insert_match = re.match(r"INSERT\s+INTO\s+\[?([^\]]+)\]?", sql, re.IGNORECASE | re.DOTALL)
+        insert_match = re.match(r"INSERT\s+INTO\s+\[?([^\]\s]+)\]?", sql, re.IGNORECASE | re.DOTALL)
         if insert_match:
             table_name = insert_match.group(1).strip()
             return table_name, None
