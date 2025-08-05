@@ -470,19 +470,15 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         update_match = re.match(r"UPDATE\s+\[?([^\]]+)\]?\s+SET.*?(?:\s+WHERE\s+(.*))?$", sql, re.IGNORECASE | re.DOTALL)
         if update_match:
             table_name = update_match.group(1).strip()
-            if '.' in table_name:
-                table_name = table_name.split('.')[1]
             where_clause = update_match.group(2) or ''
-            return table_name.strip('[]'), where_clause
+            return table_name, where_clause
 
         # 匹配DELETE
         delete_match = re.match(r"DELETE\s+FROM\s+\[?([^\]]+)\]?\s*(?:\s+WHERE\s+(.*))?$", sql, re.IGNORECASE | re.DOTALL)
         if delete_match:
             table_name = delete_match.group(1).strip()
-            if '.' in table_name:
-                table_name = table_name.split('.')[1]
             where_clause = delete_match.group(2) or ''
-            return table_name.strip('[]'), where_clause
+            return table_name, where_clause
 
         return None, None
 
