@@ -474,27 +474,47 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         sql = re.sub(r"/\*.*\*/", "", sql, flags=re.DOTALL)
         sql = sql.strip()
 
-        # 匹配UPDATE
-        update_match = re.match(r"UPDATE\s+\[?([^\]]+)\]?\s+SET.*?(?:\s+WHERE\s+(.*))?$", sql, re.IGNORECASE | re.DOTALL)
-        if update_match:
-            table_name = update_match.group(1).strip()
-            where_clause = update_match.group(2) or ''
-            return table_name, where_clause
+        parsed = sqlparse.parse(sql)[0]
+        stmt_type = parsed.get_type()
+        table_name = None
+        where_clause = None
 
-        # 匹配DELETE
-        delete_match = re.match(r"DELETE\s+FROM\s+\[?([^\]]+)\]?\s*(?:\s+WHERE\s+(.*))?$", sql, re.IGNORECASE | re.DOTALL)
-        if delete_match:
-            table_name = delete_match.group(1).strip()
-            where_clause = delete_match.group(2) or ''
-            return table_name, where_clause
+        if stmt_type == 'UPDATE':
+            # Extract table name
+            for t in parsed.tokens:
+                if isinstance(t, sqlparse.sql.Identifier):
+                    table_name = t.get_real_name()
+                    break
+            # Extract where clause
+            where_token = next((t for t in parsed.tokens if isinstance(t, sqlparse.sql.Where)), None)
+            if where_token:
+                where_clause = where_token.value
+        elif stmt_type == 'DELETE':
+            # Extract table name
+            from_seen = False
+            for t in parsed.tokens:
+                if t.is_keyword and t.normalized == 'FROM':
+                    from_seen = True
+                    continue
+                if from_seen and isinstance(t, sqlparse.sql.Identifier):
+                    table_name = t.get_real_name()
+                    break
+            # Extract where clause
+            where_token = next((t for t in parsed.tokens if isinstance(t, sqlparse.sql.Where)), None)
+            if where_token:
+                where_clause = where_token.value
+        elif stmt_type == 'INSERT':
+            # Extract table name
+            into_seen = False
+            for t in parsed.tokens:
+                if t.is_keyword and t.normalized == 'INTO':
+                    into_seen = True
+                    continue
+                if into_seen and isinstance(t, sqlparse.sql.Identifier):
+                    table_name = t.get_real_name()
+                    break
 
-        # 匹配INSERT
-        insert_match = re.match(r"INSERT\s+INTO\s+\[?([^\]\s]+)\]?", sql, re.IGNORECASE | re.DOTALL)
-        if insert_match:
-            table_name = insert_match.group(1).strip()
-            return table_name, None
-
-        return None, None
+        return table_name, where_clause
 
     def get_rollback(self, workflow):
         """
