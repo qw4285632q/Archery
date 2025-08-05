@@ -53,7 +53,8 @@ class DynamicStorage:
         self.sftp_host = self.config["sftp_host"]
         self.sftp_user = self.config["sftp_user"]
         self.sftp_password = self.config["sftp_password"]
-        self.sftp_port = int(self.config.get("sftp_port", 22))
+        sftp_port = self.config.get("sftp_port", 22)
+        self.sftp_port = int(sftp_port) if sftp_port else 22
         self.sftp_path = self.config["sftp_path"]
 
         # AWS S3 存储相关配置信息
