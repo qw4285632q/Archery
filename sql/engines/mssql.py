@@ -15,9 +15,18 @@ logger = logging.getLogger("default")
 
 
 class MssqlEngine(EngineBase):
+    def __init__(self, instance=None):
+        super().__init__(instance)
+        self.db_name = None
     test_query = "SELECT 1"
 
     def get_connection(self, db_name=None):
+        if self.conn and db_name and self.db_name != db_name:
+            self.close()
+
+        if self.conn:
+            return self.conn
+
         connstr = """DRIVER=ODBC Driver 18 for SQL Server;SERVER={0},{1};UID={2};PWD={3};
 client charset = UTF-8;connect timeout=10;CHARSET={4};TrustServerCertificate=yes;""".format(
             self.host,
@@ -28,9 +37,8 @@ client charset = UTF-8;connect timeout=10;CHARSET={4};TrustServerCertificate=yes
         )
         if db_name:
             connstr = f"{connstr};DATABASE={db_name}"
-        if self.conn:
-            return self.conn
         self.conn = pyodbc.connect(connstr)
+        self.db_name = db_name
         return self.conn
 
     name = "MsSQL"
@@ -776,3 +784,4 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         if self.conn:
             self.conn.close()
             self.conn = None
+            self.db_name = None
