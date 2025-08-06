@@ -389,27 +389,51 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
     def execute_check(self, db_name=None, sql=""):
         """上线单执行前的检查, 返回Review set"""
         check_result = ReviewSet(full_sql=sql)
-        # 切分语句，追加到检测结果中，默认全部检测通过
-        split_reg = re.compile("^GO$", re.I | re.M)
-        sql = re.split(split_reg, sql, 0)
-        sql = filter(None, sql)
-        split_sql = [f"""use [{db_name}]"""]
-        for i in sql:
-            split_sql = split_sql + [i]
-        rowid = 1
-        for statement in split_sql:
-            check_result.rows.append(
-                ReviewResult(
-                    id=rowid,
-                    errlevel=0,
-                    stagestatus="Audit completed",
-                    errormessage="None",
-                    sql=statement,
-                    affected_rows=0,
-                    execute_time=0,
-                )
-            )
-            rowid += 1
+        conn = None
+        try:
+            conn = self.get_connection(db_name=db_name)
+            cursor = conn.cursor()
+
+            cursor.execute("SET NOEXEC ON;")
+
+            # Split SQL by 'GO' and check each statement
+            split_reg = re.compile("^GO$", re.I | re.M)
+            statements = re.split(split_reg, sql, 0)
+
+            rowid = 1
+            for statement in filter(None, statements):
+                s = statement.strip()
+                if not s:
+                    continue
+                try:
+                    cursor.execute(s)
+                    # If no exception, syntax is OK
+                    check_result.rows.append(
+                        ReviewResult(
+                            id=rowid, errlevel=0, stagestatus="Audit completed",
+                            errormessage="None", sql=s,
+                        )
+                    )
+                except Exception as e:
+                    # Syntax error
+                    check_result.rows.append(
+                        ReviewResult(
+                            id=rowid, errlevel=2, stagestatus="Audit failed",
+                            errormessage=str(e), sql=s,
+                        )
+                    )
+                    check_result.error_count += 1
+                rowid += 1
+
+            cursor.execute("SET NOEXEC OFF;")
+
+        except Exception as e:
+            check_result.error = str(e)
+            check_result.error_count = 1
+        finally:
+            if conn:
+                self.close()
+
         return check_result
 
     def execute_workflow(self, workflow):
