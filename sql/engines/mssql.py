@@ -511,7 +511,12 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                     into_seen = True
                     continue
                 if into_seen and isinstance(t, sqlparse.sql.Identifier):
-                    table_name = t.value
+                    table_name_parts = []
+                    for token in t.tokens:
+                        if isinstance(token, sqlparse.sql.Parenthesis):
+                            break
+                        table_name_parts.append(token.value)
+                    table_name = "".join(table_name_parts).strip()
                     break
 
         return table_name, where_clause
