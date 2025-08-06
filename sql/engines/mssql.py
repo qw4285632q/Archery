@@ -596,6 +596,31 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                                 rollback_sql_list.append([original_sql, rollback_sql])
                             except ValueError:
                                 pass
+                else:
+                    # 没有主键，使用全字段匹配删除
+                    values_match = re.search(r"VALUES\s*\((.*)\)", original_sql, re.IGNORECASE)
+
+                    temp_sql_for_cols = original_sql
+                    if values_match:
+                        temp_sql_for_cols = original_sql.replace(values_match.group(0), '')
+                    columns_match = re.search(r"\((.*?)\)", temp_sql_for_cols)
+
+                    if columns_match and values_match:
+                        columns = [c.strip().strip('[]') for c in columns_match.group(1).split(',')]
+                        values = [v.strip() for v in values_match.group(1).split(',')]
+
+                        if len(columns) == len(values):
+                            where_clause_parts = []
+                            for i in range(len(columns)):
+                                col = columns[i]
+                                val = values[i]
+                                if val.upper() == 'NULL':
+                                    where_clause_parts.append(f"[{col}] IS NULL")
+                                else:
+                                    where_clause_parts.append(f"[{col}] = {val}")
+                            where_clause = " AND ".join(where_clause_parts)
+                            rollback_sql = f"DELETE FROM {table_name} WHERE {where_clause};"
+                            rollback_sql_list.append([original_sql, rollback_sql])
         return rollback_sql_list
 
     def _get_primary_key(self, db_name, tb_name):
