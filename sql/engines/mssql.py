@@ -454,9 +454,24 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
 
         # 保存备份
         if backup_result.rows:
+            # Convert binary data to string before JSON serialization
+            rows_dict_list = []
+            for row in backup_result.rows:
+                row_dict = {}
+                for i, col_value in enumerate(row):
+                    col_name = backup_result.column_list[i]
+                    if isinstance(col_value, bytes):
+                        try:
+                            row_dict[col_name] = col_value.decode('utf-8')
+                        except UnicodeDecodeError:
+                            row_dict[col_name] = repr(col_value)
+                    else:
+                        row_dict[col_name] = col_value
+                rows_dict_list.append(row_dict)
+
             # 将数据序列化为JSON
             backup_data = json.dumps(
-                [dict(zip(backup_result.column_list, row)) for row in backup_result.rows],
+                rows_dict_list,
                 default=str,
             )
             # 存储到历史记录表
