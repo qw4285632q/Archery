@@ -445,7 +445,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                 col_tokens = column_paren.tokens[1:-1]
                 columns = [t.value.strip('[]') for t in col_tokens if not t.is_whitespace and t.value != ',']
 
-            if not primary_key or primary_key not in columns:
+            if not primary_key or primary_key.lower() not in [c.lower() for c in columns]:
                 error_message = "Table has no primary key or INSERT statement does not include the primary key field."
                 SqlBackupHistory.objects.create(
                     workflow=workflow,
