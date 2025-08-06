@@ -580,7 +580,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             elif stmt_type == 'INSERT':
                 parsed = sqlparse.parse(original_sql)[0]
 
-                # Find the list of values
+                # Find values parenthesis
                 values_paren = None
                 values_keyword_found = False
                 for token in parsed.tokens:
@@ -594,14 +594,11 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                 if not values_paren:
                     continue
 
-                id_list = next((t for t in values_paren.tokens if isinstance(t, sqlparse.sql.IdentifierList)), None)
-                if not id_list:
-                    continue
+                # Extract values from parenthesis
+                value_tokens = values_paren.tokens[1:-1]
+                values = [t.value for t in value_tokens if not t.is_whitespace and t.value != ',']
 
-                values = [item.value for item in id_list.get_identifiers()]
-
-                # Find the list of columns
-                columns = []
+                # Find column parenthesis
                 column_paren = None
                 for token in parsed.tokens:
                     if token.is_keyword and token.normalized.upper() == 'VALUES':
@@ -609,12 +606,11 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                     if isinstance(token, sqlparse.sql.Parenthesis):
                         column_paren = token
 
+                columns = []
                 if column_paren:
-                    id_list_cols = next((t for t in column_paren.tokens if isinstance(t, sqlparse.sql.IdentifierList)), None)
-                    if id_list_cols:
-                        columns = [item.get_real_name() for item in id_list_cols.get_identifiers()]
-
-                if not columns:
+                    col_tokens = column_paren.tokens[1:-1]
+                    columns = [t.value.strip('[]') for t in col_tokens if not t.is_whitespace and t.value != ',']
+                else:
                     all_cols_rs = self.get_all_columns_by_tb(workflow.db_name, table_name)
                     if not all_cols_rs.error:
                         columns = all_cols_rs.rows
