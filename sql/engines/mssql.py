@@ -458,44 +458,6 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         if not table_name:
             raise Exception("Failed to parse table name from SQL")
 
-        parsed = sqlparse.parse(sql_content)[0]
-        stmt_type = parsed.get_type()
-
-        if stmt_type == 'INSERT':
-            primary_key = self._get_primary_key(workflow.db_name, table_name)
-
-            # Parse columns
-            column_paren = None
-            for token in parsed.tokens:
-                if token.is_keyword and token.normalized.upper() == 'VALUES':
-                    break
-                if isinstance(token, sqlparse.sql.Parenthesis):
-                    column_paren = token
-
-            columns = []
-            if column_paren:
-                col_tokens = column_paren.tokens[1:-1]
-                columns = [t.value.strip().strip('[]').strip() for t in col_tokens if not t.is_whitespace and t.value != ',']
-
-            if not primary_key or primary_key.lower() not in [c.lower() for c in columns]:
-                error_message = "Table has no primary key or INSERT statement does not include the primary key field."
-                SqlBackupHistory.objects.create(
-                    workflow=workflow,
-                    table_name=table_name,
-                    sql_statement=sql_content,
-                    backup_data=json.dumps({"error": error_message}),
-                )
-                return
-
-            # If checks pass, create an empty backup record for now.
-            SqlBackupHistory.objects.create(
-                workflow=workflow,
-                table_name=table_name,
-                sql_statement=sql_content,
-                backup_data='[]',
-            )
-            return
-
         # 构建备份查询 for UPDATE/DELETE
         backup_sql = f"SELECT * FROM {table_name}"
         if where_clause:
