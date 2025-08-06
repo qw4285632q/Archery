@@ -441,7 +441,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         parsed = sqlparse.parse(sql_content)[0]
         stmt_type = parsed.get_type()
 
-        if workflow.is_backup and stmt_type in ('DELETE', 'UPDATE'):
+        if workflow.is_backup and stmt_type in ('DELETE', 'UPDATE', 'INSERT'):
             # 备份数据
             self._backup(workflow)
         return self.execute(
@@ -496,7 +496,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             )
             return
 
-        # 构建备份查询
+        # 构建备份查询 for UPDATE/DELETE
         backup_sql = f"SELECT * FROM {table_name}"
         if where_clause:
             backup_sql += f" WHERE {where_clause}"
@@ -650,6 +650,8 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                     rollback_sql = f"UPDATE {table_name} SET {set_clause} WHERE {where_clause};"
                     rollback_sql_list.append([original_sql, rollback_sql])
             elif stmt_type == 'INSERT':
+                # For INSERT, rollback is generated from the SQL statement itself.
+                # The backup record is only used to check if the backup was successful.
                 primary_key = self._get_primary_key(workflow.db_name, table_name)
                 if not primary_key:
                     continue
@@ -691,11 +693,15 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                     if not all_cols_rs.error:
                         columns = all_cols_rs.rows
 
-                if len(columns) == len(values) and primary_key in columns:
-                    pk_index = columns.index(primary_key)
-                    pk_value = values[pk_index]
-                    rollback_sql = f"DELETE FROM {table_name} WHERE [{primary_key}] = {pk_value};"
-                    rollback_sql_list.append([original_sql, rollback_sql])
+                if len(columns) == len(values):
+                    # Case-insensitive check for primary key
+                    pk_lower = primary_key.lower()
+                    cols_lower = [c.lower() for c in columns]
+                    if pk_lower in cols_lower:
+                        pk_index = cols_lower.index(pk_lower)
+                        pk_value = values[pk_index]
+                        rollback_sql = f"DELETE FROM {table_name} WHERE [{primary_key}] = {pk_value};"
+                        rollback_sql_list.append([original_sql, rollback_sql])
         return rollback_sql_list
 
     def _get_primary_key(self, db_name, tb_name):
