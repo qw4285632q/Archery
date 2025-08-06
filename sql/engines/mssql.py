@@ -411,23 +411,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
 
         if workflow.is_backup and stmt_type in ('DELETE', 'UPDATE', 'INSERT'):
             # 备份数据
-            try:
-                self._backup(workflow)
-            except Exception as e:
-                logger.error(f"MsSQL backup failed: {e}\n{traceback.format_exc()}")
-                # 备份失败，直接返回错误，不继续执行
-                result = ReviewSet(
-                    full_sql=workflow.sqlworkflowcontent.sql_content,
-                )
-                result.rows = [ReviewResult(
-                    id=1,
-                    errlevel=2,
-                    stagestatus='Execute Failed',
-                    errormessage=f'Backup failed: {e}',
-                    sql=workflow.sqlworkflowcontent.sql_content
-                )]
-                result.error = f'Backup failed: {e}'
-                return result
+            self._backup(workflow)
         return self.execute(
             db_name=workflow.db_name, sql=workflow.sqlworkflowcontent.sql_content
         )
@@ -447,10 +431,31 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
 
         if stmt_type == 'INSERT':
             primary_key = self._get_primary_key(workflow.db_name, table_name)
-            if not primary_key:
-                raise Exception("Table has no primary key, backup is not supported for INSERT statements.")
 
-            # For INSERT, we don't back up data, just create a record for rollback purposes
+            # Parse columns
+            column_paren = None
+            for token in parsed.tokens:
+                if token.is_keyword and token.normalized.upper() == 'VALUES':
+                    break
+                if isinstance(token, sqlparse.sql.Parenthesis):
+                    column_paren = token
+
+            columns = []
+            if column_paren:
+                col_tokens = column_paren.tokens[1:-1]
+                columns = [t.value.strip('[]') for t in col_tokens if not t.is_whitespace and t.value != ',']
+
+            if not primary_key or primary_key not in columns:
+                error_message = "Table has no primary key or INSERT statement does not include the primary key field."
+                SqlBackupHistory.objects.create(
+                    workflow=workflow,
+                    table_name=table_name,
+                    sql_statement=sql_content,
+                    backup_data=json.dumps({"error": error_message}),
+                )
+                return
+
+            # If checks pass, create an empty backup record for now.
             SqlBackupHistory.objects.create(
                 workflow=workflow,
                 table_name=table_name,
@@ -570,6 +575,9 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             try:
                 # json.loads may fail
                 backup_data = json.loads(history.backup_data)
+                if isinstance(backup_data, dict) and 'error' in backup_data:
+                    # This was a failed backup, skip it.
+                    continue
             except Exception:
                 # if backup_data is not valid json, we can't generate rollback sql
                 # just skip this history
