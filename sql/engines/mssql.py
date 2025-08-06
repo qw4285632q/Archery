@@ -442,6 +442,23 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         if not table_name:
             raise Exception("Failed to parse table name from SQL")
 
+        parsed = sqlparse.parse(sql_content)[0]
+        stmt_type = parsed.get_type()
+
+        if stmt_type == 'INSERT':
+            primary_key = self._get_primary_key(workflow.db_name, table_name)
+            if not primary_key:
+                raise Exception("Table has no primary key, backup is not supported for INSERT statements.")
+
+            # For INSERT, we don't back up data, just create a record for rollback purposes
+            SqlBackupHistory.objects.create(
+                workflow=workflow,
+                table_name=table_name,
+                sql_statement=sql_content,
+                backup_data='[]',
+            )
+            return
+
         # 构建备份查询
         backup_sql = f"SELECT * FROM {table_name}"
         if where_clause:
@@ -593,6 +610,10 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                     rollback_sql = f"UPDATE {table_name} SET {set_clause} WHERE {where_clause};"
                     rollback_sql_list.append([original_sql, rollback_sql])
             elif stmt_type == 'INSERT':
+                primary_key = self._get_primary_key(workflow.db_name, table_name)
+                if not primary_key:
+                    continue
+
                 parsed = sqlparse.parse(original_sql)[0]
 
                 # Find values parenthesis
@@ -630,25 +651,11 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                     if not all_cols_rs.error:
                         columns = all_cols_rs.rows
 
-                if len(columns) == len(values):
-                    primary_key = self._get_primary_key(workflow.db_name, table_name)
-                    if primary_key and primary_key in columns:
-                        pk_index = columns.index(primary_key)
-                        pk_value = values[pk_index]
-                        rollback_sql = f"DELETE FROM {table_name} WHERE [{primary_key}] = {pk_value};"
-                        rollback_sql_list.append([original_sql, rollback_sql])
-                    else:
-                        where_clause_parts = []
-                        for i in range(len(columns)):
-                            col = columns[i]
-                            val = values[i]
-                            if val.upper() == 'NULL':
-                                where_clause_parts.append(f"[{col}] IS NULL")
-                            else:
-                                where_clause_parts.append(f"[{col}] = {val}")
-                        where_clause = " AND ".join(where_clause_parts)
-                        rollback_sql = f"DELETE FROM {table_name} WHERE {where_clause};"
-                        rollback_sql_list.append([original_sql, rollback_sql])
+                if len(columns) == len(values) and primary_key in columns:
+                    pk_index = columns.index(primary_key)
+                    pk_value = values[pk_index]
+                    rollback_sql = f"DELETE FROM {table_name} WHERE [{primary_key}] = {pk_value};"
+                    rollback_sql_list.append([original_sql, rollback_sql])
         return rollback_sql_list
 
     def _get_primary_key(self, db_name, tb_name):
