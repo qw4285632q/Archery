@@ -670,6 +670,11 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         """
         获取表的主键
         """
+        # Extract the simple table name if it's qualified
+        if '.' in tb_name:
+            tb_name = tb_name.split('.')[-1]
+        tb_name = tb_name.strip('[]')
+
         sql = """
         SELECT c.name AS ColumnName
         FROM sys.indexes AS i
