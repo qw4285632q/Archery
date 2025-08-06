@@ -507,17 +507,25 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             # Extract table name
             into_seen = False
             for t in parsed.tokens:
+                if into_seen and not t.is_whitespace:
+                    # This is the first non-whitespace token after INTO.
+                    # It should be the table name.
+                    # It could be an Identifier group or a single token.
+                    if hasattr(t, 'tokens') and t.tokens:
+                        # It's a token group.
+                        table_name_parts = []
+                        for token in t.tokens:
+                            if isinstance(token, sqlparse.sql.Parenthesis):
+                                break
+                            table_name_parts.append(token.value)
+                        table_name = "".join(table_name_parts).strip()
+                    else:
+                        # It's a single token. Just use its value.
+                        table_name = t.value
+                    break
+
                 if t.is_keyword and t.normalized == 'INTO':
                     into_seen = True
-                    continue
-                if into_seen and isinstance(t, sqlparse.sql.Identifier):
-                    table_name_parts = []
-                    for token in t.tokens:
-                        if isinstance(token, sqlparse.sql.Parenthesis):
-                            break
-                        table_name_parts.append(token.value)
-                    table_name = "".join(table_name_parts).strip()
-                    break
 
         return table_name, where_clause
 
