@@ -323,6 +323,7 @@ class DamengEngine(EngineBase):
 
                         parsed = sqlparse.parse(s)[0]
                         stmt_type = parsed.get_type()
+                        logger.debug(f"Statement type for '{s}': {stmt_type}")
 
                         if stmt_type in ('UPDATE', 'DELETE', 'INSERT'):
                             table_name = None
