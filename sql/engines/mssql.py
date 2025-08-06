@@ -503,7 +503,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             # Extract where clause
             where_token = next((t for t in parsed.tokens if isinstance(t, sqlparse.sql.Where)), None)
             if where_token:
-                where_clause = where_token.value
+                where_clause = ''.join(t.value for t in where_token.tokens[1:]).strip()
         elif stmt_type == 'DELETE':
             # Extract table name
             from_seen = False
@@ -517,7 +517,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             # Extract where clause
             where_token = next((t for t in parsed.tokens if isinstance(t, sqlparse.sql.Where)), None)
             if where_token:
-                where_clause = where_token.value
+                where_clause = ''.join(t.value for t in where_token.tokens[1:]).strip()
         elif stmt_type == 'INSERT':
             # Extract table name
             into_seen = False
