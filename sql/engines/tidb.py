@@ -70,10 +70,7 @@ class TidbEngine(MysqlEngine):
             raise Exception("Failed to parse table name from SQL")
 
         # 构建备份查询
-        if '.' in table_name:
-            backup_sql = f"SELECT * FROM `{table_name}`"
-        else:
-            backup_sql = f"SELECT * FROM `{db_name}`.`{table_name}`"
+        backup_sql = f"SELECT * FROM {table_name}"
         if where_clause:
             backup_sql += f" WHERE {where_clause}"
 
@@ -104,15 +101,31 @@ class TidbEngine(MysqlEngine):
         sql = re.sub(r"/\*.*\*/", "", sql, flags=re.DOTALL)
         sql = sql.strip()
 
-        # 匹配UPDATE
-        update_match = re.match(r"UPDATE\s+`?([^`]+)`?\s+SET.*?(?:\s+WHERE\s+(.*))?$", sql, re.IGNORECASE | re.DOTALL)
-        if update_match:
-            table_name = update_match.group(1).strip()
-            if '.' in table_name:
-                table_name = table_name.split('.')[1]
-            where_clause = update_match.group(2) or ''
-            return table_name.strip('`'), where_clause
+        parsed = sqlparse.parse(sql)[0]
+        stmt_type = parsed.get_type()
 
+        if stmt_type == 'UPDATE':
+            set_token_index = -1
+            for i, token in enumerate(parsed.tokens):
+                if token.is_keyword and token.normalized == 'SET':
+                    set_token_index = i
+                    break
+
+            if set_token_index == -1:
+                return None, None
+
+            # Table references are between UPDATE and SET
+            table_refs_tokens = parsed.tokens[1:set_token_index]
+            table_name = ''.join(t.value for t in table_refs_tokens).strip()
+
+            where_token = next((t for t in parsed.tokens if isinstance(t, sqlparse.sql.Where)), None)
+            where_clause = None
+            if where_token:
+                where_clause = ''.join(t.value for t in where_token.tokens[1:]).strip()
+
+            return table_name, where_clause
+
+        # Fallback to regex for other types for now
         # 匹配DELETE
         delete_match = re.match(r"DELETE\s+FROM\s+`?([^`]+)`?\s*(?:\s+WHERE\s+(.*))?$", sql, re.IGNORECASE | re.DOTALL)
         if delete_match:
