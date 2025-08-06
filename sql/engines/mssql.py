@@ -662,8 +662,14 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         """
         获取表的主键
         """
-        sql = f"SELECT KU.column_name FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS TC INNER JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS KU ON TC.CONSTRAINT_TYPE = 'PRIMARY KEY' AND TC.CONSTRAINT_NAME = KU.CONSTRAINT_NAME AND KU.table_name = TC.table_name AND KU.table_schema = TC.table_schema WHERE TC.TABLE_SCHEMA = '{db_name}' AND TC.TABLE_NAME = '{tb_name}';"
-        result = self.query(db_name=db_name, sql=sql)
+        sql = """
+        SELECT c.name AS ColumnName
+        FROM sys.indexes AS i
+        INNER JOIN sys.index_columns AS ic ON i.index_id = ic.index_id AND i.object_id = ic.object_id
+        INNER JOIN sys.columns AS c ON ic.column_id = c.column_id AND ic.object_id = c.object_id
+        WHERE i.is_primary_key = 1 AND i.object_id = OBJECT_ID(?);
+        """
+        result = self.query(db_name=db_name, sql=sql, parameters=(tb_name,))
         if result.rows:
             return result.rows[0][0]
         return None
