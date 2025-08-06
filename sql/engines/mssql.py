@@ -417,7 +417,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         parsed = sqlparse.parse(sql_content)[0]
         stmt_type = parsed.get_type()
 
-        if workflow.is_backup and stmt_type in ('DELETE', 'UPDATE', 'INSERT'):
+        if workflow.is_backup and stmt_type in ('DELETE', 'UPDATE'):
             # 备份数据
             self._backup(workflow)
         return self.execute(
@@ -451,7 +451,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             columns = []
             if column_paren:
                 col_tokens = column_paren.tokens[1:-1]
-                columns = [t.value.strip('[]') for t in col_tokens if not t.is_whitespace and t.value != ',']
+                columns = [t.value.strip().strip('[]').strip() for t in col_tokens if not t.is_whitespace and t.value != ',']
 
             if not primary_key or primary_key.lower() not in [c.lower() for c in columns]:
                 error_message = "Table has no primary key or INSERT statement does not include the primary key field."
@@ -681,7 +681,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         # Extract the simple table name if it's qualified
         if '.' in tb_name:
             tb_name = tb_name.split('.')[-1]
-        tb_name = tb_name.strip('[]')
+        tb_name = tb_name.strip().strip('[]').strip()
 
         sql = """
         SELECT c.name AS ColumnName
@@ -691,8 +691,8 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         WHERE i.is_primary_key = 1 AND i.object_id = OBJECT_ID(?);
         """
         result = self.query(db_name=db_name, sql=sql, parameters=(tb_name,))
-        if result.rows:
-            return result.rows[0][0]
+        if result.rows and result.rows[0][0]:
+            return result.rows[0][0].strip()
         return None
 
     def _format_sql_value(self, value):
