@@ -441,7 +441,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         parsed = sqlparse.parse(sql_content)[0]
         stmt_type = parsed.get_type()
 
-        if workflow.is_backup and stmt_type in ('DELETE', 'UPDATE', 'INSERT'):
+        if workflow.is_backup and stmt_type in ('DELETE', 'UPDATE'):
             # 备份数据
             self._backup(workflow)
         return self.execute(
