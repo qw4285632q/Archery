@@ -483,7 +483,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             # Extract table name
             for t in parsed.tokens:
                 if isinstance(t, sqlparse.sql.Identifier):
-                    table_name = t.get_real_name()
+                    table_name = t.value
                     break
             # Extract where clause
             where_token = next((t for t in parsed.tokens if isinstance(t, sqlparse.sql.Where)), None)
@@ -497,7 +497,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                     from_seen = True
                     continue
                 if from_seen and isinstance(t, sqlparse.sql.Identifier):
-                    table_name = t.get_real_name()
+                    table_name = t.value
                     break
             # Extract where clause
             where_token = next((t for t in parsed.tokens if isinstance(t, sqlparse.sql.Where)), None)
@@ -511,7 +511,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                     into_seen = True
                     continue
                 if into_seen and isinstance(t, sqlparse.sql.Identifier):
-                    table_name = t.get_real_name()
+                    table_name = t.value
                     break
 
         return table_name, where_clause
