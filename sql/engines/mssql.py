@@ -578,49 +578,66 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                     rollback_sql = f"UPDATE {table_name} SET {set_clause} WHERE {where_clause};"
                     rollback_sql_list.append([original_sql, rollback_sql])
             elif stmt_type == 'INSERT':
-                # 获取主键
-                primary_key = self._get_primary_key(workflow.db_name, table_name)
-                if primary_key:
-                    # 从INSERT语句中提取主键的值
-                    values_match = re.search(r"VALUES\s*\((.*)\)", original_sql, re.IGNORECASE)
-                    if values_match:
-                        values = [v.strip() for v in values_match.group(1).split(',')]
-                        #  获取主键的位置
-                        columns_match = re.search(r"\((.*)\)", original_sql, re.IGNORECASE)
-                        if columns_match:
-                            columns = [c.strip().strip('[]') for c in columns_match.group(1).split(',')]
-                            try:
-                                pk_index = columns.index(primary_key)
-                                pk_value = values[pk_index]
-                                rollback_sql = f"DELETE FROM {table_name} WHERE [{primary_key}] = {pk_value};"
-                                rollback_sql_list.append([original_sql, rollback_sql])
-                            except ValueError:
-                                pass
-                else:
-                    # 没有主键，使用全字段匹配删除
-                    values_match = re.search(r"VALUES\s*\((.*)\)", original_sql, re.IGNORECASE)
+                parsed = sqlparse.parse(original_sql)[0]
 
-                    temp_sql_for_cols = original_sql
-                    if values_match:
-                        temp_sql_for_cols = original_sql.replace(values_match.group(0), '')
-                    columns_match = re.search(r"\((.*?)\)", temp_sql_for_cols)
+                # Find the list of values
+                values_paren = None
+                values_keyword_found = False
+                for token in parsed.tokens:
+                    if token.is_keyword and token.normalized.upper() == 'VALUES':
+                        values_keyword_found = True
+                        continue
+                    if values_keyword_found and isinstance(token, sqlparse.sql.Parenthesis):
+                        values_paren = token
+                        break
 
-                    if columns_match and values_match:
-                        columns = [c.strip().strip('[]') for c in columns_match.group(1).split(',')]
-                        values = [v.strip() for v in values_match.group(1).split(',')]
+                if not values_paren:
+                    continue
 
-                        if len(columns) == len(values):
-                            where_clause_parts = []
-                            for i in range(len(columns)):
-                                col = columns[i]
-                                val = values[i]
-                                if val.upper() == 'NULL':
-                                    where_clause_parts.append(f"[{col}] IS NULL")
-                                else:
-                                    where_clause_parts.append(f"[{col}] = {val}")
-                            where_clause = " AND ".join(where_clause_parts)
-                            rollback_sql = f"DELETE FROM {table_name} WHERE {where_clause};"
-                            rollback_sql_list.append([original_sql, rollback_sql])
+                id_list = next((t for t in values_paren.tokens if isinstance(t, sqlparse.sql.IdentifierList)), None)
+                if not id_list:
+                    continue
+
+                values = [item.value for item in id_list.get_identifiers()]
+
+                # Find the list of columns
+                columns = []
+                column_paren = None
+                for token in parsed.tokens:
+                    if token.is_keyword and token.normalized.upper() == 'VALUES':
+                        break
+                    if isinstance(token, sqlparse.sql.Parenthesis):
+                        column_paren = token
+
+                if column_paren:
+                    id_list_cols = next((t for t in column_paren.tokens if isinstance(t, sqlparse.sql.IdentifierList)), None)
+                    if id_list_cols:
+                        columns = [item.get_real_name() for item in id_list_cols.get_identifiers()]
+
+                if not columns:
+                    all_cols_rs = self.get_all_columns_by_tb(workflow.db_name, table_name)
+                    if not all_cols_rs.error:
+                        columns = all_cols_rs.rows
+
+                if len(columns) == len(values):
+                    primary_key = self._get_primary_key(workflow.db_name, table_name)
+                    if primary_key and primary_key in columns:
+                        pk_index = columns.index(primary_key)
+                        pk_value = values[pk_index]
+                        rollback_sql = f"DELETE FROM {table_name} WHERE [{primary_key}] = {pk_value};"
+                        rollback_sql_list.append([original_sql, rollback_sql])
+                    else:
+                        where_clause_parts = []
+                        for i in range(len(columns)):
+                            col = columns[i]
+                            val = values[i]
+                            if val.upper() == 'NULL':
+                                where_clause_parts.append(f"[{col}] IS NULL")
+                            else:
+                                where_clause_parts.append(f"[{col}] = {val}")
+                        where_clause = " AND ".join(where_clause_parts)
+                        rollback_sql = f"DELETE FROM {table_name} WHERE {where_clause};"
+                        rollback_sql_list.append([original_sql, rollback_sql])
         return rollback_sql_list
 
     def _get_primary_key(self, db_name, tb_name):
