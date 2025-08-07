@@ -507,47 +507,66 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
 
         parsed = sqlparse.parse(sql)[0]
         stmt_type = parsed.get_type()
-        table_name = None
-        where_clause = None
 
         if stmt_type == 'UPDATE':
-            # Extract table name
+            state = 'start'
+            table_tokens = []
+            where_clause = None
+
             for t in parsed.tokens:
-                if isinstance(t, sqlparse.sql.Identifier):
-                    table_name = t.value
-                    break
-            # Extract where clause
-            where_token = next((t for t in parsed.tokens if isinstance(t, sqlparse.sql.Where)), None)
-            if where_token:
-                where_clause = ''.join(t.value for t in where_token.tokens[1:]).strip()
-        elif stmt_type == 'DELETE':
-            # Extract table name
-            from_seen = False
-            for t in parsed.tokens:
-                if t.is_keyword and t.normalized == 'FROM':
-                    from_seen = True
+                if state == 'start' and t.is_keyword and t.normalized == 'UPDATE':
+                    state = 'in_modifiers'
                     continue
-                if from_seen and isinstance(t, sqlparse.sql.Identifier):
-                    table_name = t.value
-                    break
-            # Extract where clause
+
+                if state == 'in_modifiers':
+                    if t.is_keyword and t.normalized in ('LOW_PRIORITY', 'IGNORE'): # SQL Server doesn't have these, but good to have
+                        continue
+                    elif not t.is_whitespace:
+                        state = 'in_tables'
+                        table_tokens.append(t)
+                    continue
+
+                if state == 'in_tables':
+                    if t.is_keyword and t.normalized == 'SET':
+                        state = 'in_set'
+                        continue
+                    table_tokens.append(t)
+
+            table_name = ''.join(t.value for t in table_tokens).strip()
+
             where_token = next((t for t in parsed.tokens if isinstance(t, sqlparse.sql.Where)), None)
             if where_token:
                 where_clause = ''.join(t.value for t in where_token.tokens[1:]).strip()
-        elif stmt_type == 'INSERT':
-            # Extract table name
-            into_seen = False
-            for t in parsed.tokens:
-                if into_seen and not t.is_whitespace:
-                    table_name = t.value
-                    if '(' in table_name:
-                        table_name = table_name.split('(')[0].strip()
-                    break
 
-                if t.is_keyword and t.normalized == 'INTO':
-                    into_seen = True
+            return table_name, where_clause
 
-        return table_name, where_clause
+        elif stmt_type == 'DELETE':
+            from_token_index = -1
+            where_token_index = -1
+
+            # Find FROM and WHERE keywords
+            for i, token in enumerate(parsed.tokens):
+                if token.is_keyword and token.normalized == 'FROM':
+                    from_token_index = i
+                if isinstance(token, sqlparse.sql.Where):
+                    where_token_index = i
+
+            if from_token_index != -1:
+                if where_token_index != -1:
+                    table_refs_tokens = parsed.tokens[from_token_index+1 : where_token_index]
+                else:
+                    table_refs_tokens = parsed.tokens[from_token_index+1 :]
+
+                table_name = ''.join(t.value for t in table_refs_tokens).strip()
+
+                where_token = next((t for t in parsed.tokens if isinstance(t, sqlparse.sql.Where)), None)
+                where_clause = None
+                if where_token:
+                    where_clause = ''.join(t.value for t in where_token.tokens[1:]).strip()
+
+                return table_name, where_clause
+
+        return None, None
 
     def get_rollback(self, workflow):
         """
