@@ -136,15 +136,31 @@ class TidbEngine(MysqlEngine):
 
             return table_name, where_clause
 
-        # Fallback to regex for other types for now
-        # 匹配DELETE
-        delete_match = re.match(r"DELETE\s+FROM\s+`?([^`]+)`?\s*(?:\s+WHERE\s+(.*))?$", sql, re.IGNORECASE | re.DOTALL)
-        if delete_match:
-            table_name = delete_match.group(1).strip()
-            if '.' in table_name:
-                table_name = table_name.split('.')[1]
-            where_clause = delete_match.group(2) or ''
-            return table_name.strip('`'), where_clause
+        elif stmt_type == 'DELETE':
+            from_token_index = -1
+            where_token_index = -1
+
+            # Find FROM and WHERE keywords
+            for i, token in enumerate(parsed.tokens):
+                if token.is_keyword and token.normalized == 'FROM':
+                    from_token_index = i
+                if isinstance(token, sqlparse.sql.Where):
+                    where_token_index = i
+
+            if from_token_index != -1:
+                if where_token_index != -1:
+                    table_refs_tokens = parsed.tokens[from_token_index+1 : where_token_index]
+                else:
+                    table_refs_tokens = parsed.tokens[from_token_index+1 :]
+
+                table_name = ''.join(t.value for t in table_refs_tokens).strip()
+
+                where_token = next((t for t in parsed.tokens if isinstance(t, sqlparse.sql.Where)), None)
+                where_clause = None
+                if where_token:
+                    where_clause = ''.join(t.value for t in where_token.tokens[1:]).strip()
+
+                return table_name, where_clause
 
         # 匹配ALTER
         alter_match = re.match(r"ALTER\s+TABLE\s+`?([^`\s]+)`?", sql, re.IGNORECASE | re.DOTALL)
