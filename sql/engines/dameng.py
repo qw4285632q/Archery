@@ -325,31 +325,12 @@ class DamengEngine(EngineBase):
                         stmt_type = parsed.get_type()
                         logger.debug(f"Statement type for '{s}': {stmt_type}")
 
-                        if stmt_type in ('UPDATE', 'DELETE', 'INSERT'):
-                            table_name = None
-                            where_clause = ""
-
-                            # Extract table name
-                            from_seen = False
-                            update_seen = False
-                            for t in parsed.tokens:
-                                if t.is_keyword and t.normalized == 'FROM':
-                                    from_seen = True
-                                    continue
-                                if t.is_keyword and t.normalized == 'UPDATE':
-                                    update_seen = True
-                                    continue
-                                if (from_seen or update_seen) and isinstance(t, sqlparse.sql.Identifier):
-                                    table_name = t.get_real_name()
-                                    break
-
-                            # Extract where clause
-                            where_token = next((t for t in parsed.tokens if isinstance(t, sqlparse.sql.Where)), None)
-                            if where_token:
-                                where_clause = where_token.value
-
+                        if stmt_type in ('UPDATE', 'DELETE'):
+                            table_name, where_clause = self._parse_sql(s)
                             if table_name:
-                                backup_sql = f"SELECT * FROM {table_name} {where_clause}"
+                                backup_sql = f"SELECT * FROM {table_name}"
+                                if where_clause:
+                                    backup_sql += f" WHERE {where_clause}"
                                 logger.info(f"Executing backup query for workflow {workflow.id}: {backup_sql}")
                                 backup_cursor.execute(backup_sql)
                                 rows = backup_cursor.fetchall()
@@ -474,6 +455,69 @@ class DamengEngine(EngineBase):
                 self.close()
 
         return execute_result_set
+
+    def _parse_sql(self, sql):
+        """简单的SQL解析，用于提取表名和where条件, 只支持简单的UPDATE/DELETE语句"""
+        # 移除注释
+        sql = re.sub(r"--.*", "", sql)
+        sql = re.sub(r"/\*.*\*/", "", sql, flags=re.DOTALL)
+        sql = sql.strip()
+
+        parsed = sqlparse.parse(sql)[0]
+        stmt_type = parsed.get_type()
+
+        if stmt_type == 'UPDATE':
+            state = 'start'
+            table_tokens = []
+            where_clause = None
+
+            for t in parsed.tokens:
+                if state == 'start' and t.is_keyword and t.normalized == 'UPDATE':
+                    state = 'in_tables'
+                    continue
+
+                if state == 'in_tables':
+                    if t.is_keyword and t.normalized == 'SET':
+                        state = 'in_set'
+                        continue
+                    table_tokens.append(t)
+
+            table_name = ''.join(t.value for t in table_tokens).strip()
+
+            where_token = next((t for t in parsed.tokens if isinstance(t, sqlparse.sql.Where)), None)
+            if where_token:
+                where_clause = ''.join(t.value for t in where_token.tokens[1:]).strip()
+
+            return table_name, where_clause
+
+        elif stmt_type == 'DELETE':
+            from_token_index = -1
+            where_token_index = -1
+
+            # Find FROM and WHERE keywords
+            for i, token in enumerate(parsed.tokens):
+                if token.is_keyword and token.normalized == 'FROM':
+                    from_token_index = i
+                if isinstance(token, sqlparse.sql.Where):
+                    where_token_index = i
+
+            if from_token_index != -1:
+                if where_token_index != -1:
+                    table_refs_tokens = parsed.tokens[from_token_index+1 : where_token_index]
+                else:
+                    table_refs_tokens = parsed.tokens[from_token_index+1 :]
+
+                table_name = ''.join(t.value for t in table_refs_tokens).strip()
+
+                where_token = next((t for t in parsed.tokens if isinstance(t, sqlparse.sql.Where)), None)
+                where_clause = None
+                if where_token:
+                    where_clause = ''.join(t.value for t in where_token.tokens[1:]).strip()
+
+                return table_name, where_clause
+
+        return None, None
+
     def _format_sql_value(self, value):
         """
         Formats a Python value for use in a SQL query.
