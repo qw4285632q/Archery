@@ -105,21 +105,32 @@ class TidbEngine(MysqlEngine):
         stmt_type = parsed.get_type()
 
         if stmt_type == 'UPDATE':
-            set_token_index = -1
-            for i, token in enumerate(parsed.tokens):
-                if token.is_keyword and token.normalized == 'SET':
-                    set_token_index = i
-                    break
+            state = 'start'
+            table_tokens = []
+            where_clause = None
 
-            if set_token_index == -1:
-                return None, None
+            for t in parsed.tokens:
+                if state == 'start' and t.is_keyword and t.normalized == 'UPDATE':
+                    state = 'in_modifiers'
+                    continue
 
-            # Table references are between UPDATE and SET
-            table_refs_tokens = parsed.tokens[1:set_token_index]
-            table_name = ''.join(t.value for t in table_refs_tokens).strip()
+                if state == 'in_modifiers':
+                    if t.is_keyword and t.normalized in ('LOW_PRIORITY', 'IGNORE'):
+                        continue
+                    elif not t.is_whitespace:
+                        state = 'in_tables'
+                        table_tokens.append(t)
+                    continue
+
+                if state == 'in_tables':
+                    if t.is_keyword and t.normalized == 'SET':
+                        state = 'in_set'
+                        continue
+                    table_tokens.append(t)
+
+            table_name = ''.join(t.value for t in table_tokens).strip()
 
             where_token = next((t for t in parsed.tokens if isinstance(t, sqlparse.sql.Where)), None)
-            where_clause = None
             if where_token:
                 where_clause = ''.join(t.value for t in where_token.tokens[1:]).strip()
 
