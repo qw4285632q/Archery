@@ -18,7 +18,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from sql.engines import get_engine
-from sql.utils.workflow_audit import Audit, get_auditor
+from sql.utils.workflow_audit import get_auditor
 from sql.utils.resource_group import user_instances
 from common.utils.const import WorkflowType, WorkflowStatus
 from common.config import SysConfig

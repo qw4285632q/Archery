@@ -4,11 +4,11 @@ import traceback
 
 from django.db import close_old_connections, connection, transaction
 from django_redis import get_redis_connection
-from common.utils.const import WorkflowStatus, WorkflowType
+from common.utils.const import WorkflowType
 from common.config import SysConfig
 from sql.engines.models import ReviewResult, ReviewSet
 from sql.models import SqlWorkflow
-from sql.notify import notify_for_execute, EventType
+from sql.notify import notify_for_execute
 from sql.utils.workflow_audit import Audit
 from sql.engines import get_engine
 from sql.offlinedownload import OffLineDownLoad

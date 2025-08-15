@@ -51,3 +51,5 @@ django_storages==1.14.6
 boto3
 azure_storage_blob==12.26.0
 openpyxl==3.1.5
+pytest==8.4.1
+pytest_mock==3.14.1

@@ -58,6 +58,7 @@ env = environ.Env(
             "elasticsearch",
             "opensearch",
             'dm',
+            'tidb'
         ],
     ),
     ENABLED_NOTIFIERS=(
@@ -110,6 +111,7 @@ AVAILABLE_ENGINES = {
     "elasticsearch": {"path": "sql.engines.elasticsearch:ElasticsearchEngine"},
     "opensearch": {"path": "sql.engines.elasticsearch:OpenSearchEngine"},
     'dm': {'path': 'sql.engines.dameng:DamengEngine'},
+    'tidb': {'path': 'sql.engines.tidb:TidbEngine'},
 }
 ENABLED_NOTIFIERS = env("ENABLED_NOTIFIERS")
 

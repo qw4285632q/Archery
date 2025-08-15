@@ -22,11 +22,10 @@ from sql import (
     data_dictionary,
     archiver,
     audit_log,
-    user,
+    user, offlinedownload,
 )
 from sql.utils import tasks
 from common.utils import ding_api
-from sql import offlinedownload
 
 urlpatterns = [
     path("", views.index),

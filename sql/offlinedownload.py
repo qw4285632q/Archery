@@ -133,7 +133,17 @@ class OffLineDownLoad(EngineBase):
         full_sql = sqlparse.format(full_sql, strip_comments=True)
         full_sql = sqlparse.split(full_sql)[0]
         sql = full_sql.strip()
-        count_sql = f"SELECT COUNT(*) FROM ({sql.rstrip(';')}) t"
+        # SQLServer中SQL语句有order by select count(*) from (sql) t会报错
+        # 尝试去掉order by语句
+        parsed = sqlparse.parse(sql.rstrip(";"))[0]
+        tokens = parsed.tokens
+        for i, token in enumerate(tokens):
+            if token.ttype == sqlparse.tokens.Keyword and token.value.upper() == "ORDER BY":
+                # 删除从ORDER BY到结尾的所有token
+                del tokens[i:]
+                break
+        sql_for_count = "".join(map(str, tokens))
+        count_sql = f"SELECT COUNT(*) FROM ({sql_for_count}) t"
         clean_sql = sql.strip().lower()
         instance = workflow
         check_result = ReviewSet(full_sql=sql)

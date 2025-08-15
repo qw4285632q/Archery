@@ -2,11 +2,25 @@ import datetime
 
 import pytest
 from pytest_mock import MockFixture
+from django.contrib.auth.models import Group
+
+from common.utils.const import WorkflowStatus
+from sql.models import (
+    Instance,
+    ResourceGroup,
+    SqlWorkflow,
+    SqlWorkflowContent,
+    QueryPrivilegesApply,
+    ArchiveConfig,
+    InstanceTag,
+    WorkflowAudit,
+)
+from common.config import SysConfig
+from sql.utils.workflow_audit import AuditV2, AuditSetting
 
 
 @pytest.fixture
 def normal_user(django_user_model):
-    from sql.models import Users
     user = django_user_model.objects.create(
         username="test_user", display="中文显示", is_active=True
     )
